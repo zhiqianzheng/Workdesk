@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN" data-tools-collapsed="true">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>项目资料 · Workdesk</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<div class="terminal-titlebar" aria-hidden="true"><div class="terminal-title-tab"><span class="terminal-title-icon">&gt;_</span><span class="terminal-title-path">C:\Windows\system32\cmd.exe</span><span class="terminal-title-close">×</span></div><span class="terminal-title-add">+</span><span class="terminal-title-menu">⌄</span><div class="terminal-window-controls"><span>−</span><span>▢</span><span>×</span></div></div>
+<div id="workspace">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="mark" id="brandMark">▥</span><div><span id="brandName">WORKDESK</span><small id="brandCaption">项目资料工作台</small></div></div>
+    <button class="nav active" id="recordsNav"><span>▤</span> 项目资料 <kbd>01</kbd></button>
+    <button class="nav" id="notesNav"><span>▧</span> 工作笔记 <kbd>02</kbd></button>
+    <div class="section-label">项目目录 <button id="refreshSide" title="刷新项目目录" aria-label="刷新项目目录">↻</button></div>
+    <div id="unreadSummary" class="unread-summary" role="status" aria-live="polite">正在读取会话更新…</div>
+    <div class="search"><span>⌕</span><input id="search" placeholder="输入备注名或群名…" aria-label="搜索联系人或项目"></div>
+    <div class="directory-actions"><button id="searchContacts" disabled>搜索联系人</button><button id="clearDirectory" hidden>返回目录</button></div><div id="projects" class="projects"></div>
+    <div class="sidebar-bottom"><span class="dot" id="connectionDot"></span><span id="connectionLabel">正在检查连接</span><button id="settingsButton" aria-label="打开设置">⚙</button></div>
+  </aside>
+  <main>
+    <div class="tools-toggle-bar"><button type="button" id="toolsToggle" aria-expanded="false" aria-controls="workspaceHeader readingControls recordHeading recordMeta recordToolbar historyTools">展开工具</button></div>
+    <header id="workspaceHeader"><div class="breadcrumb"><button type="button" id="sidebarToggle" aria-controls="sidebar" aria-expanded="true" title="收起左侧目录">收起目录</button>个人空间 <span>/</span> <b id="breadcrumb">项目资料</b></div><div class="header-actions"><div class="appearance-switch" role="group" aria-label="切换显示风格"><button type="button" data-appearance="workdesk" aria-pressed="true" title="项目工作台风格">工作台</button><button type="button" data-appearance="document" aria-pressed="false" title="WPS 式文档风格">文档</button><button type="button" data-appearance="code" aria-pressed="false" title="VS Code 式代码风格">代码</button><button type="button" data-appearance="terminal" aria-pressed="false" title="终端风格">终端</button></div><span class="local-badge">仅本机</span><button id="privacyButton" title="当前网页内 Ctrl+Shift+Space">切换笔记 <kbd>Esc</kbd></button></div></header>
+    <div class="document-chrome" aria-hidden="true"><div class="document-menu"><strong>文字</strong><span class="menu-current">开始</span><span>插入</span><span>页面布局</span><span>引用</span><span>审阅</span><span>视图</span></div><div class="document-ribbon"><span class="font-sample">正文 · 等线 <i>五号</i></span><span class="type-sample"><b>B</b> <i>I</i> <u>U</u></span><span>段落　 ≡　 ☷</span><span class="style-sample">Aa <small>正文</small></span><span class="style-sample">标题 <small>标题 1</small></span><span class="ribbon-caption">文档阅读视图</span></div><div class="document-ruler">1　　2　　3　　4　　5　　6　　7　　8　　9　　10　　11　　12　　13　　14　　15</div></div>
+    <div class="code-chrome" aria-hidden="true"><div class="code-menu">文件　 编辑　 选择　 查看　 转到　 运行　 终端　 帮助 <span>项目工作区</span></div><div class="code-tab"><span>Ｍ　 workspace.md</span><span>notes.md</span><small>工作区 / records / 当前记录</small></div></div>
+    <div class="terminal-chrome" aria-hidden="true"><div class="terminal-tab"><span>&gt;_　workdesk</span><small>本地会话视图</small></div><div class="terminal-command"><span>C:\Workspace&gt;</span> workdesk --local <small>UTF-8 / scrollback</small></div></div>
+    <div class="reading-controls" id="readingControls"><button id="focusAppearance" aria-pressed="false">专注外观</button><span id="readingHint">连续正文 · 精简目录</span><button id="recordDetails" hidden>记录详情</button><button id="toggleComposer" hidden aria-expanded="false" aria-controls="composerArea">添加批注</button></div>
+    <div id="terminalExtras"></div>
+    <section id="recordPage">
+      <div class="page-heading" id="recordHeading"><div><div class="eyebrow">PROJECT LIBRARY</div><h1 id="projectTitle">项目资料</h1><p id="subtitle">将往来文字整理为一份持续更新的工作记录。</p></div><button id="renameButton" disabled>编辑别名</button></div>
+      <div id="demoBanner" class="banner demo" hidden>界面预览 · 以下均为虚构示例，不连接真实会话，也不会发送消息。<button id="exitDemo">退出预览</button></div>
+      <section id="setup" class="setup">
+        <div class="setup-icon">▤</div><div class="eyebrow">让资料开始流动</div><h2>工作台已就绪，等待连接</h2><p id="setupDetail">正在检查本机文字接口…</p>
+        <ol><li><b>打开原窗口</b><span>保持微信已登录、未最小化，不需要再重启。</span></li><li><b>选择会话</b><span>进入普通文字聊天，工作台发送时会替换当前聊天的原窗口草稿。</span></li><li><b>回到这里连接</b><span>连接后可在左侧搜索联系人、切换会话。语音仍在原窗口操作。</span></li></ol>
+        <div class="setup-actions"><button class="primary" id="connectButton">重新连接</button><button id="demoButton">查看界面预览</button></div>
+        <small>原窗口可以被工作台覆盖；发送时会短暂激活原窗口。</small>
+      </section>
+      <section id="connectedArea" hidden>
+        <div class="document-meta" id="recordMeta"><div><span>资料类型</span><strong>往来记录</strong></div><div><span>当前条目</span><strong id="recordCount">0</strong></div><div><span>最近同步</span><strong id="syncTime">—</strong></div><div><span>数据范围</span><strong>当前窗口已加载内容</strong></div></div>
+        <div class="toolbar" id="recordToolbar"><div class="tabs"><button class="selected" id="tableView">记录表</button><button id="documentView">文档</button></div><div class="tools"><input id="recordSearch" placeholder="筛选记录内容" aria-label="筛选记录内容"><button id="refreshButton">↻ 同步</button></div></div>
+        <div class="history-tools" id="historyTools"><button id="olderRecords">↑ 更早记录</button><span id="historyStatus" role="status">向上滚动查看更早消息</span><button id="latestRecords">↓ 回到最新</button></div>
+        <div class="table-heading"><span>编号</span><span>记录内容</span><span>来源</span></div>
+        <div id="recordList" class="record-list" tabindex="0" aria-label="项目记录"></div>
+        <div class="scope-note" id="scopeNote">只读取已加载文字，不会自动翻历史记录。附件请使用原窗口。</div>
+      </section>
+      <section class="composer" id="composerArea"><div class="composer-title"><strong>添加记录</strong><span id="recipient">等待选择项目</span></div><span id="commandPrompt" aria-hidden="true">C:\Workspace&gt;</span><textarea id="draft" rows="3" maxlength="4000" placeholder="输入或粘贴文字、图片；Enter 发送，Shift+Enter 换行…" disabled></textarea><div id="composerShortcut" class="scope-note" aria-live="polite">Ctrl+V 粘贴文字或图片 · Enter 发送 · Shift+Enter 换行</div><div class="image-tools"><button id="pickImage" disabled>＋ 添加图片</button><input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><span>单张 · PNG / JPEG / WebP · ≤ 8 MB</span></div><div id="imageDraft" class="image-draft" hidden><img id="imageThumb" alt="待发送图片"><div><span id="imageName"></span><small>点击发送图片后，会发给上方标明的实际对象。</small></div><button id="removeImage">移除</button><button id="sendImage" class="primary" disabled>发送图片 ↗</button></div><div class="composer-footer"><span id="sendHint">提交记录会通过微信发送给当前对象。</span><div><span id="charCount">0 / 4000</span><button class="primary" id="sendButton" disabled>提交记录 ↗</button></div></div></section>
+      <div class="page-footer"><span>LOCAL WORKSPACE / 01</span><button id="nativeButton">打开原窗口 ↗</button></div>
+    </section>
+    <section id="notesPage" hidden>
+      <div class="page-heading"><div><div class="eyebrow">PERSONAL DOCUMENT</div><h1>工作笔记</h1><p>整理事项，记录想法。</p></div><span class="local-badge" id="noteSaved">仅保存于本机浏览器</span></div>
+      <div class="note-paper"><div class="note-paper-title">事项备忘 <span id="noteDate"></span></div><textarea id="notes" spellcheck="false" aria-label="工作笔记" placeholder="本周事项&#10;&#10;1. &#10;2. &#10;3. "></textarea></div>
+      <div class="page-footer"><span>LOCAL WORKSPACE / 02</span><button id="returnButton">返回项目资料</button></div>
+    </section>
+    <div id="status" role="status" aria-live="polite"></div>
+  </main>
+</div>
+<div class="appearance-status" aria-hidden="true"><span id="appearanceStatusLeft"></span><span id="appearanceStatusRight"></span></div>
+<dialog id="settings"><form method="dialog"><div class="dialog-title"><h2>工作台设置</h2><button aria-label="关闭设置">×</button></div><p>本地连接与使用说明</p><dl><dt>连接方式</dt><dd>优先使用本机文字控件；不可用时自动使用 Windows OCR。接收的文字和预览只在内存中处理，不上传到其他服务。发送图片时临时使用剪贴板，完成后恢复原内容；期间若你复制了新内容，会保留新内容。粘贴时可能短暂切换到微信，不再打开文件选择窗口。</dd><dt>记录范围</dt><dd>文字控件可用时支持联系人搜索和会话切换；图片显示当前窗口预览。OCR 降级模式仅有可见文字，不是完整历史备份。</dd><dt>文字提交</dt><dd>“提交记录”会真实发送。发送时会先清空当前聊天的原窗口草稿；对象变化或接口不可用时停止。状态未知时请先到原窗口核对。</dd><dt>切换笔记</dt><dd>Esc 或 Ctrl+Shift+Space，仅在此网页获得焦点时生效。不会隐藏微信自身窗口、通知或任务栏。</dd><dt>兼容性</dt><dd>OCR 需要原窗口保持打开且未最小化，可以被工作台覆盖。发送时短暂激活原窗口；目前支持每条 200 字以内的单行文字，校对失败会保留草稿。</dd></dl><div class="settings-actions"><button type="button" id="settingsReconnect">重新连接</button><button type="button" id="settingsDemo">界面预览</button><button type="button" id="checkSend" disabled>检查上次发送</button><button type="button" id="resolveSend" disabled>已在原窗口核对，解除锁定</button><button type="button" id="stopButton">停止本地服务</button></div></form></dialog>
+<dialog id="rename"><form id="renameForm"><div class="dialog-title"><h2>项目别名</h2><button type="button" id="cancelRename" aria-label="取消">×</button></div><p>只改变工作台显示，不修改微信备注。</p><label for="aliasInput">项目名称</label><input id="aliasInput" maxlength="40" required autocomplete="off"><button class="primary" type="submit">保存别名</button></form></dialog>
+<dialog id="imageViewer"><div class="dialog-title"><h2>图片预览</h2><button id="closeImage" aria-label="关闭图片">×</button></div><img id="largeImage" alt="当前窗口图片预览"><p>来自当前窗口的预览；原图请在微信中打开。</p></dialog>
+<dialog id="readingDetails"><div class="dialog-title"><h2>记录详情</h2><button id="closeDetails" aria-label="关闭记录详情">×</button></div><p>按读取顺序显示原文，保留消息边界与时间文字。图片请从正文附件入口查看。</p><ol id="detailRows"></ol></dialog>
+</body></html>
