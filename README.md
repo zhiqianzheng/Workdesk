@@ -4,6 +4,22 @@ Workdesk 是一个运行在 Windows 本机的微信界面辅助工具：将电�
 
 它依赖已登录的电脑版微信，通过 Windows UI Automation 读取界面并执行操作；文字控件不可用时尝试本地 OCR。它不是独立微信客户端，也不是微信官方网页版。
 
+**直接使用：** [下载 Windows 组合便携包](https://github.com/zhiqianzheng/Workdesk/releases/latest)（含 WindowOpacity 和中文使用说明）。完整解压后双击 `Workdesk-Plus.exe`，会自动启动本地服务并打开网页。
+
+## 效果预览
+
+以下为实际网页界面截图，使用虚构演示数据，不包含真实联系人或聊天记录。演示模式禁用发送，图中的灰色按钮不代表正式连接后的状态。点击图片可查看原图。
+
+| 项目工作台：目录、记录与输入区 | 文档：纸张布局与连续正文 |
+| --- | --- |
+| [![项目工作台效果](docs/screenshots/workdesk.png)](docs/screenshots/workdesk.png) | [![文档风格效果](docs/screenshots/document.png)](docs/screenshots/document.png) |
+
+| 代码：文件目录与编辑器外观 | 终端：日志排版与单行提示符 |
+| --- | --- |
+| [![代码风格效果](docs/screenshots/code.png)](docs/screenshots/code.png) | [![终端风格效果](docs/screenshots/terminal.png)](docs/screenshots/terminal.png) |
+
+通过顶部外观按钮切换风格；终端截图展示了收起目录和工具后的布局，可用 `Ctrl+Alt+X` 展开目录。
+
 ## 功能
 
 - **四种外观**：工作台、文档、代码、终端，可切换并记住选择。
