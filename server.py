@@ -1,5 +1,6 @@
 """Loopback-only project workdesk; chat payloads are never written to disk."""
 import argparse
+from host_runtime import data_home
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,8 +19,8 @@ PORT = 18765
 
 
 def runtime_dir(port=PORT):
-    if getattr(sys, 'frozen', False):
-        return Path(os.environ['LOCALAPPDATA']) / 'Workdesk' / 'runtime' / str(port)
+    if getattr(sys, 'frozen', False) or os.name != 'nt':
+        return data_home() / 'runtime' / str(port)
     return ROOT / '.runtime'
 
 
@@ -45,6 +46,9 @@ class Service:
             self.ai = AutoReply(self, ai_path)
 
     def call(self, method, *args):
+        if os.name != 'nt' and not self.native:
+            return {'connected': False, 'sessions': [], 'records': [], 'canSend': False,
+                    'detail': '请从桌面控制台准备后台并扫码登录。Linux 仅支持原生后台连接。'}
         if self.native:
             try:
                 return getattr(self.bridge, method)(*args)
@@ -307,6 +311,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if os.name != 'nt':
+        os.umask(0o077)
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=PORT)
     parser.add_argument('--no-browser', action='store_true')
@@ -315,7 +321,7 @@ def main():
     runtime.mkdir(parents=True, exist_ok=True)
     native_path = runtime / 'native-backend.json'
     native_settings = json.loads(native_path.read_text(encoding='utf-8')) if native_path.exists() else None
-    service = Service(Path(os.environ['LOCALAPPDATA']) / 'Workdesk' / 'ai-settings.json', native_settings)
+    service = Service(data_home() / 'ai-settings.json', native_settings)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     except OSError:
