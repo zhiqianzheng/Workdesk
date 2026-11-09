@@ -4,13 +4,13 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 提供两种接入方式：默认通过 Windows UI Automation 读取已登录的电脑版微信，文字控件不可用时尝试本地 OCR；可选 Agent WeChat 原生后台连接，通过本机 HTTP 接口收发消息，不操作桌面鼠标、键盘或剪贴板。本项目不是微信官方网页版。
 
-**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.1)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
+**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.2)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
 
-> v1.1.0-preview.1 为 Windows x64 桌面预览包，内置 Python 运行环境、Agent WeChat v2.2.0、AI 监听与守护。已通过隔离启动和配置验证，尚未在第二台电脑完成真实扫码收发验收；不含 WindowOpacity。
+> v1.1.0-preview.2 为 Windows x64 桌面预览包，内置 Python 运行环境、Agent WeChat v2.2.0、AI 监听与守护。已通过隔离启动和配置验证，尚未在第二台电脑完成真实扫码收发验收；不含 WindowOpacity。
 
 ## 桌面控制台（本地预览版）
 
-新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.1 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
+新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.2 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
 
 - 后台模式：自动准备本机服务 → 扫码登录 → 打开工作台；AI 在控制台中配置，选择联系人或群聊，保存后默认暂停，确认授权再点击开启。
 - 官方窗口模式：选择对应选项，自行登录电脑版微信，然后打开工作台；AI 配置使用网页内的设置。
@@ -22,14 +22,14 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## Ubuntu 安装与使用（x64 预览版）
 
-[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.1/Workdesk_1.1.0-preview.1_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.1/Workdesk-Ubuntu-Guide.txt)
+[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.2/Workdesk_1.1.0-preview.2_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.2/Workdesk-Ubuntu-Guide.txt)
 
 面向 Ubuntu 22.04 / 24.04 **amd64（x86_64）桌面环境**，不适用于 ARM64。已在 WSL Ubuntu 22.04 / Python 3.10 中验证安装、Tk 界面、本地后台接口、钥匙串及暂停保护；Ubuntu 24.04 和独立 Ubuntu 桌面的真实扫码、文字/图片收发、AI 回复仍待实测，当前为预览版。
 
 在下载目录打开终端执行：
 
 ```bash
-sudo apt install ./Workdesk_1.1.0-preview.1_amd64.deb
+sudo apt install ./Workdesk_1.1.0-preview.2_amd64.deb
 ```
 
 安装后从应用菜单打开 **Workdesk**，或运行 `workdesk`。使用普通桌面用户启动，不要用 `sudo workdesk`。
@@ -46,6 +46,20 @@ Linux 版仅提供 Agent WeChat 原生后台连接，不通过桌面鼠标、键
 API 密钥由 Secret Service 系统钥匙串保存，首次使用可能要求解锁登录钥匙串；无可用或未解锁的钥匙串时需先处理系统提示。账号与运行配置默认位于 `~/.local/share/workdesk`（遵循 `XDG_DATA_HOME`），不会随安装包提供任何开发者账号、API 密钥或聊天记录。
 
 卸载使用 `sudo apt remove workdesk`；个人运行数据与钥匙串不会自动删除。发行包的 SHA-256 见同一 Release 的 `Workdesk-Ubuntu-SHA256.txt`。从源码启动 Linux 桌面入口时使用 `python3 desktop.pyw`，并自行放置经过 `desktop_app.py` 中 SHA-256 校验的上游 Linux v2.2.0 二进制到 `vendor/agent-wechat/wx`、赋予执行权限；推荐直接使用 `.deb`。
+
+## AI 识图与文件附件（preview.2）
+
+以下新增功能适用于 Windows / Ubuntu 的 **Agent WeChat 原生后台模式**。Windows UIA/OCR 模式不包含这些新增附件能力。
+
+- **AI 识图**：对接管范围内的新图片消息，下载校验后压缩为最长边受 1600×1200 限制的 JPEG，与近期文字一起送给模型。需要支持 Chat Completions 图片输入的模型；仅支持文字的模型无法识图。
+- **文件发送和下载**：输入区点击 `File` 选择附件，再点 `Send file`；文件消息旁点击 `Download file`。单文件 1 字节至 8 MB，收到文件会检查所属会话、大小与 SHA-256。发送任务完成不代表收件人已打开；结果未知时不要重复发送。
+- **AI 文件解析**：读取 TXT、Markdown、CSV、JSON、日志、常见代码/配置文件及 DOCX 正文；单文档最多提供前 12000 个字符，超出时明确标记截断。DOCX 只提取正文文字，不解析内嵌图片、版式或宏。
+- **暂不支持解析**：PDF（含扫描版）、旧版 DOC、Excel、压缩包和可执行文件。它们在大小限制内仍可作为附件收发，但不能宣称 AI 已读懂；不会执行附件里的代码或命令。
+- 单次回复上下文最多 12 条记录、4 个新图片/文件附件，超过限制不静默丢弃附件。图片下载或文件校验失败时不会编造已读取的内容。
+
+**数据流向**：接管范围内的图片以及提取的附件文字会发送到你配置的模型 API 服务。密钥仍由 Windows DPAPI / Linux Secret Service 保护；不随发行包提供账号、密钥或聊天数据。AI 默认关闭，保持原有接管范围、手动暂停与后台恢复机制。
+
+已通过隔离测试验证附件类型识别、会话绑定、完整性校验、TXT/DOCX 提取、多模态请求格式和失败时不发送；开发机配置的 API 成功识别合成测试图。**尚未完成新版安装包在第二台电脑上真实微信图片/文件收发及 AI 自动回复的端到端验收。**这些验证不能等同于所有模型、所有文件或所有微信账号都可用。
 
 ## 效果预览
 
