@@ -1,0 +1,60 @@
+name: Build desktop releases
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v1.1.0-preview.3']
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: windows-2022
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Windows build dependencies
+        if: runner.os == 'Windows'
+        run: python -m pip install -r scripts/requirements-windows.txt
+      - name: Install test dependencies
+        if: runner.os == 'Linux'
+        run: python -m pip install Pillow==11.3.0
+      - name: Python regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Browser logic regression tests
+        run: node tests/test_refresh.cjs
+      - name: Build and verify package
+        run: python scripts/build_release.py ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Workdesk-${{ matrix.platform }}
+          path: |
+            dist/*.deb
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --title 'Workdesk v1.1.0-preview.3' --notes-file docs/releases/v1.1.0-preview.3.md

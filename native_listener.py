@@ -112,15 +112,37 @@ def work(thread, messages, since=0):
         if STOP.exists():
             return {'state': 'cancelled'}
         key = 'global-v1-' + hashlib.sha256((thread + '|' + '|'.join(sorted(messages))).encode()).hexdigest()[:40]
+        images = getattr(reply, 'images', ())
+        if images:
+            from native_images import send_image
+            from native_backend import key as binding_key
+            connection = NativeConnection({'directory': str(ROOT), 'account': CONFIG['account']})
+            connection.selected = thread
+            connection.known[thread] = info
+            try:
+                for index, image in enumerate(images[:1]):
+                    if STOP.exists():
+                        return {'state': 'cancelled'}
+                    dispatched = True
+                    sent_image = send_image(connection, binding_key(thread), image,
+                                            request_id=key + '-image-' + str(index), should_stop=STOP.exists)
+                    if sent_image.get('state') == 'not_sent':
+                        return {'state': 'cancelled' if STOP.exists() else 'retry', 'errorType': 'ImageNotSent'}
+                    if sent_image.get('state') != 'observed':
+                        return {'state': 'uncertain', 'errorType': 'ImageSendUnknown'}
+            finally:
+                connection.close()
+            if STOP.exists():
+                return {'state': 'cancelled'}
         dispatched = True
-        sent = request('sends', {'threadId': thread, 'text': reply}, key)
+        sent = request('sends', {'threadId': thread, 'text': str(reply)}, key)
         deadline = time.monotonic() + 30
         while sent.get('state') in ('queued', 'running', 'preparing', 'uploading', 'submitting') and time.monotonic() < deadline:
             time.sleep(.15)
             sent = request('sends/' + quote(sent['id']))
         if sent.get('state') != 'accepted' or not sent.get('serverId'):
             return {'state': 'uncertain'}
-        return {'state': 'accepted', 'modelSeconds': model_seconds,
+        return {'state': 'accepted', 'imageCount': len(images), 'modelSeconds': model_seconds,
                 'totalSeconds': round(time.monotonic() - started, 2)}
     except Exception as error:
         return {'state': 'uncertain' if dispatched else 'retry', 'errorType': type(error).__name__}

@@ -101,6 +101,8 @@ class Platform:
             old = json.loads(old_path.read_text(encoding='utf-8')) if old_path.exists() else {}
             if not data.get('apiKey') and old.get('encryptedKey'):
                 data['apiKey'] = protect(old['encryptedKey'], decrypt=True)
+            data.setdefault('webSearch', old.get('webSearch', False))
+            data.setdefault('mediaReplies', old.get('mediaReplies', False))
             config = AutoReply.validate(data)
             if not config['allContacts'] and not config['contacts']:
                 raise ValueError('请选择至少一个接管对象，或明确选择全部好友与群聊。')
@@ -179,7 +181,7 @@ def main():
     from PIL import Image, ImageTk
     app = tk.Tk()
     app.title('Workdesk · 连接与 AI 控制台')
-    app.geometry('850x760')
+    app.geometry('900x840')
     app.minsize(760, 680)
     platform = Platform()
     events = queue.Queue()
@@ -233,14 +235,18 @@ def main():
     ttk.Label(qr_window, text='请用自己的手机微信扫码并确认').pack(pady=12)
     qr = ttk.Label(qr_window);qr.pack(pady=5)
     form = ttk.LabelFrame(frame, text='可选：AI 自动回复（初次配置默认暂停）', padding=12);form.pack(fill='both', expand=True)
+    try:
+        saved_ai = json.loads((platform.root / 'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        saved_ai = {}
     fields = {}
     for name, label, default in [('endpoint','API 地址',''),('model','模型 ID',''),('apiKey','API 密钥',''),('style','回复风格','自然口语化，简短友好，根据话题回复一到三句。')]:
         row = ttk.Frame(form);row.pack(fill='x', pady=3)
         ttk.Label(row, text=label, width=12).pack(side='left')
-        entry = ttk.Entry(row, show='●' if name == 'apiKey' else '');entry.insert(0, default);entry.pack(side='left', fill='x', expand=True)
+        entry = ttk.Entry(row, show='●' if name == 'apiKey' else '');entry.insert(0, saved_ai.get(name, default) if name != 'apiKey' else '');entry.pack(side='left', fill='x', expand=True)
         fields[name] = entry;widgets.append(entry)
     ttk.Label(form, text='地址示例：https://你的服务/v1；密钥不回显、由系统保护，再次保存留空可保留。').pack(anchor='w')
-    all_chats = tk.BooleanVar(value=False)
+    all_chats = tk.BooleanVar(value=saved_ai.get('allContacts', False))
     check = ttk.Checkbutton(form, text='接管全部好友和普通群聊（否则只回复下方选中的对象）', variable=all_chats);check.pack(anchor='w');widgets.append(check)
     selection = tk.Listbox(form, selectmode='multiple', height=5, exportselection=False);selection.pack(fill='both', expand=True);widgets.append(selection)
     actions = ttk.Frame(form);actions.pack(fill='x', pady=5)
@@ -255,15 +261,21 @@ def main():
         for name in ['endpoint', 'model', 'style']:
             if name in saved:fields[name].delete(0, 'end');fields[name].insert(0, saved[name])
         all_chats.set(saved.get('allContacts', False))
+        web_search.set(saved.get('webSearch', False))
+        media_replies.set(saved.get('mediaReplies', False))
         status.set('已加载最近会话；缺少对象时，请先用手机与对方聊一句，再刷新。')
     button(actions, '刷新接管对象', lambda: task(platform.contacts, show_contacts))
     def save():
         data = {name: entry.get() for name, entry in fields.items()}
-        data.update(contacts=[rows[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(), interval=1)
+        data.update(contacts=[rows[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(), webSearch=web_search.get(), mediaReplies=media_replies.get(), interval=1)
         task(lambda: platform.save(data), lambda _: (fields['apiKey'].delete(0, 'end'), status.set('配置已保存，AI 保持暂停。确认授权后点击开启。')))
     button(actions, '保存配置', save)
     consent = tk.BooleanVar(value=False)
     check = ttk.Checkbutton(form, text='允许将所选会话文字提交给上述 API，并自动发送生成的回复', variable=consent);check.pack(anchor='w');widgets.append(check)
+    web_search = tk.BooleanVar(value=saved_ai.get('webSearch', False))
+    check = ttk.Checkbutton(form, text='允许 AI 按需联网查询天气、新闻等（需要支持联网工具的 API）', variable=web_search);check.pack(anchor='w');widgets.append(check)
+    media_replies = tk.BooleanVar(value=saved_ai.get('mediaReplies', False))
+    check = ttk.Checkbutton(form, text='允许按对方请求生成并发送图片或表情图片（消耗图像额度，原生后台模式）', variable=media_replies);check.pack(anchor='w');widgets.append(check)
     ai_buttons = ttk.Frame(form);ai_buttons.pack(fill='x', pady=5)
     def start():
         if not consent.get():status.set('请先确认文字提交与自动回复授权。');return

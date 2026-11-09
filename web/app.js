@@ -111,7 +111,13 @@ const demoProjects=[{id:'demo1',key:'demo1',name:'需求梳理'},{id:'demo2',key
 const demoRecords={demo1:['第一阶段：整理使用场景与页面结构。','目录名称支持自定义，正文以工作记录的形式呈现。','本条为虚构示例，用于展示长文字的阅读效果。\n文字会自动换行，保留段落；内容可切换为表格或文档视图。','下一步：确认文字接口后进行收发验证。'],demo2:['页面采用灰白色与低饱和度绿色。','减少装饰，保留清晰的目录、记录和编辑区域。'],demo3:['核对当前对象与草稿保护。','图片、语音及文件在原窗口中处理。']};
 let statusTimer;
 function notify(text,persistent=false){$('status').textContent=text;$('status').classList.add('visible');clearTimeout(statusTimer);if(!persistent)statusTimer=setTimeout(()=>$('status').classList.remove('visible'),6500);}
-async function api(path,body){const result=await fetch(path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const value=await result.json();if(!result.ok){const error=new Error(value.error||'连接失败');error.outcome=value.state;throw error;}return value;}
+async function renewSession(){
+ const response=await fetch('/api/session/reconnect',{method:'POST',headers:{'X-Workdesk-Reconnect':'1'},cache:'no-store'});
+ const value=await response.json();
+ if(!response.ok||typeof value.token!=='string'||!value.token)throw new Error(value.error||'无法恢复本机连接，请确认工作台服务正在运行。');
+ token=value.token;sessionStorage.setItem('workdesk-key',token);stopped=false;
+}
+async function api(path,body,retried=false){const result=await fetch(path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const value=await result.json();if(result.status===401&&!retried){await renewSession();return api(path,body,true);}if(!result.ok){const error=new Error(value.error||'连接失败');error.outcome=value.state;throw error;}return value;}
 function alias(item,index=0){if(demo)return item.name;if(!aliases[item.key]){const numbers=Object.values(aliases).map(v=>Number(/^资料项目 (\d+)$/.exec(String(v))?.[1]||0));aliases[item.key]=`资料项目 ${String(Math.max(0,...numbers)+1).padStart(3,'0')}`;storage.set('workdesk-aliases',JSON.stringify(aliases));}return String(aliases[item.key]);}
 function currentAlias(){const c=state.current;if(!c)return '项目资料';const index=state.sessions.findIndex(s=>s.key===c.key);return alias(c,Math.max(0,index));}
 function rememberDraft(){if(state.current)drafts.set(state.current.key,$('draft').value);}
@@ -278,6 +284,7 @@ function appendTerminalRecords(root,rows,columns){
  }
 }
 function renderProjects(){
+ if($('directoryTitle'))$('directoryTitle').textContent=state.mode==='native'?(state.directoryView==='subscriptions'?'主会话 / 公众号':'主会话'):'项目目录';
  const container=$('projects');const scroll=container.scrollTop;container.replaceChildren();
  const query=$('search').value.trim().toLowerCase();
  const entries=directoryResults===null?state.sessions:directoryResults;
@@ -286,9 +293,9 @@ function renderProjects(){
   if(directoryResults===null&&query&&!s.name.toLowerCase().includes(query)&&!displayName.toLowerCase().includes(query))return;
   const observed=directoryResults===null&&!demo;
   const fresh=observed&&(s.unreadCount>0||sessionActivity.has(s.key));
-  const button=document.createElement('button');button.className='project'+(s.key===state.current?.key?' selected':'')+(fresh?' has-unread':'');
+  const button=document.createElement('button');button.className='project'+(s.folder?' folder':'')+(s.key===state.current?.key?' selected':'')+(fresh?' has-unread':'');
   button.title=focusAppearance?displayName:s.name+(s.preview?'\n'+s.preview:'');
-  const icon=document.createElement('span');icon.className='project-icon';icon.textContent='▱';
+  const icon=document.createElement('span');icon.className='project-icon';icon.textContent=s.folder?'▣':'▱';
   const text=document.createElement('div');text.className='project-copy';
   const heading=document.createElement('div');heading.className='project-line';
   const name=document.createElement('span');name.className='project-name';name.textContent=displayName;heading.append(name);
@@ -304,6 +311,7 @@ function renderProjects(){
  $('searchContacts').disabled=!state.canSearch||demo||busy||!query;
  $('backDirectory').disabled=!state.canGoBack||demo||busy;
  $('backDirectory').textContent=document.documentElement.dataset.appearance==='terminal'?'cd ..':'← 返回上一级';
+ $('backDirectory').title=state.mode==='native'&&state.directoryView==='subscriptions'?'返回主会话列表':'当前会话返回主列表';
  $('clearDirectory').hidden=!query&&directoryResults===null;
 }
 async function searchContacts(){
@@ -332,9 +340,26 @@ async function backDirectory(){
 $('backDirectory').onclick=backDirectory;
 function renderRecords(){const root=$('recordList');const atBottom=root.scrollHeight-root.scrollTop-root.clientHeight<45;const oldScroll=root.scrollTop;const anchor=Array.from(root.querySelectorAll('[data-record-id]')).find(n=>n.getBoundingClientRect&&n.getBoundingClientRect().bottom>root.getBoundingClientRect().top+1);const anchorId=anchor?.dataset.recordId;const anchorTop=anchor?.getBoundingClientRect?.().top;const query=$('recordSearch').value.trim().toLowerCase();const rows=state.records.filter(r=>!query||r.text.toLowerCase().includes(query));const terminal=document.documentElement.dataset.appearance==='terminal';const columns=terminal?Math.max(24,Math.floor((root.clientWidth-40)/8)):0;const signature=JSON.stringify([state.mode,demo,focusAppearance,terminal,columns,rows]);if(root.dataset.signature!==signature){root.replaceChildren();if(terminal&&rows.length)appendTerminalRecords(root,rows,columns);else if(focusAppearance&&rows.length)appendReadingRecords(root,rows);else rows.forEach((r,i)=>{const row=document.createElement('div');row.className='record';row.dataset.recordId=recordIdentity(r);const number=document.createElement('span');number.className='number';number.textContent=String(i+1).padStart(3,'0');const text=document.createElement('div');text.className='content';text.textContent=r.text;if(r.image){const picture=document.createElement('img');picture.src=r.image;picture.alt='当前窗口中的图片预览';picture.className='record-image';picture.onclick=()=>{$('largeImage').src=r.image;$('imageViewer').showModal();};text.append(picture);}else if(r.imagePending){const pending=document.createElement('small');pending.className='pending-preview';pending.textContent='图片预览加载中…';text.append(pending);}const source=document.createElement('span');source.className='source';source.textContent=demo?'示例资料':r.image?'图片预览':state.mode==='ocr'?'识别文字':'原始记录';row.append(number,text,source);root.append(row);});if(!rows.length){const empty=document.createElement('div');empty.className='empty-record';empty.textContent=query?'没有匹配的记录。':state.view==='navigation'?state.detail:'当前窗口还没有可读取的文字记录。';root.append(empty);}for(const attachment of rows.filter(r=>r.kind==='file')){const target=Array.from(root.querySelectorAll('[data-record-id]')).find(n=>n.dataset.recordId===recordIdentity(attachment))||root;const button=document.createElement('button');button.textContent='Download file';button.onclick=()=>downloadAttachment(attachment);target.append(button);}root.dataset.signature=signature;const retained=Array.from(root.querySelectorAll('[data-record-id]')).find(n=>n.dataset.recordId===anchorId);if(retained&&(!atBottom||historyBrowsing||historyDirection==='older'))root.scrollTop=oldScroll+retained.getBoundingClientRect().top-anchorTop;else root.scrollTop=atBottom&&!historyBrowsing?root.scrollHeight:oldScroll;}$('recordCount').textContent=String(state.records.length);}
 function updateComposer(){
- updateAttachments();const limit=state.mode==='ocr'?200:4000;$('draft').maxLength=limit;const can=state.connected&&state.canSend&&!demo&&!busy&&!lastSend?.unresolved;$('draft').disabled=!state.connected||demo||state.view==='navigation';$('draft').readOnly=busy;$('sendButton').disabled=!can||!$('draft').value.trim()||$('draft').value.length>limit||(state.mode==='ocr'&&/[\r\n\t]/.test($('draft').value));$('charCount').textContent=$('draft').value.length+' / '+limit;$('sendHint').textContent=demo?'界面预览不发送任何消息。':lastSend?.unresolved?'上次发送待核对；请在设置中检查结果或打开原窗口。':state.hasNativeDraft?'发送时会清空微信当前聊天中的旧草稿，再发送这里的内容。':state.sendNote||'提交记录会通过微信发送给当前对象。';$('checkSend').disabled=!lastSend;$('resolveSend').disabled=!lastSend?.unresolved;renderImageDraft();resizeDraft();}
+ updateAttachments();const limit=state.mode==='ocr'?200:4000;$('draft').maxLength=limit;const can=state.connected&&state.canSend&&!demo&&!busy&&!lastSend?.unresolved;$('draft').disabled=!state.connected||!state.current||demo||state.view==='navigation';$('draft').readOnly=busy;$('sendButton').disabled=!can||!$('draft').value.trim()||$('draft').value.length>limit||(state.mode==='ocr'&&/[\r\n\t]/.test($('draft').value));$('charCount').textContent=$('draft').value.length+' / '+limit;$('sendHint').textContent=demo?'界面预览不发送任何消息。':lastSend?.unresolved?'上次发送待核对；请在设置中检查结果或打开原窗口。':state.hasNativeDraft?'发送时会清空微信当前聊天中的旧草稿，再发送这里的内容。':state.sendNote||'提交记录会通过微信发送给当前对象。';$('checkSend').disabled=!lastSend;$('resolveSend').disabled=!lastSend?.unresolved;renderImageDraft();resizeDraft();}
 function render(){$('nativeButton').hidden=state.mode==='native';$('dataScope').textContent=state.mode==='native'?'Agent WeChat 已同步记录':'当前窗口已加载内容';$('olderRecords').disabled=$('latestRecords').disabled=busy||demo||!state.canHistory;$('historyStatus').textContent=historyNotice||(state.canHistory?'在记录区域向上滚动，加载更早消息':'当前连接暂不支持历史滚动');$('scopeNote').textContent=state.view==='navigation'?'公众号文章请在微信中查看；联系人目录保持可用，选择好友或群聊即可恢复聊天。':state.mode==='native'?'Agent WeChat 后台消息 · 可查看本次账号已同步的历史；支持后台图片预览与发送，点击图片可放大；语音请在手机查看。':state.mode==='ocr'?'当前使用 OCR：搜索联系人与图片收发暂不可用。':'在记录区域向上滚动查看历史；已读取内容临时保留在本页。图片为微信窗口预览，历史浏览期间点“回到最新”恢复查看新消息。';$('setup').hidden=state.connected;$('connectedArea').hidden=!state.connected;$('demoBanner').hidden=!demo;$('projectTitle').textContent=currentAlias();$('subtitle').textContent=state.connected?'记录、查阅与补充，集中在同一份资料中。':'将往来文字整理为一份持续更新的工作记录。';$('setupDetail').textContent=state.detail||'打开本机连接后即可开始。';$('connectionLabel').textContent=demo?'界面预览':state.connected?'本地已连接':'等待本地连接';$('connectionDot').classList.toggle('connected',state.connected&&!demo);$('renameButton').disabled=!state.current;$('recipient').textContent=document.documentElement.dataset.appearance==='terminal'?(demo?'Demo · sending disabled':state.current?`To: ${state.current.name}`:'To: —'):(demo?'虚构示例 · 不会发送':state.current?`实际对象：${state.current.name}`:'等待选择项目');renderProjects();renderRecords();updateComposer();}
-async function refresh(manual=false){if(demo||busy||stopped||refreshing)return;refreshing=true;const version=revision;try{const next=await api('/api/state');if(busy||demo||version!==revision)return;applyState(next);if(next.connected)$('syncTime').textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false});if(manual)notify(next.connected?'已更新本机记录。':next.detail);}catch(error){applyState({connected:false,sessions:[],records:[],canSend:false,detail:error.message});if(manual)notify(error.message);}finally{refreshing=false;}}
+async function refresh(manual=false){
+ if(demo||busy||stopped)return;
+ if(refreshing){if(manual)notify('正在连接微信后台，请稍候…');return;}
+ if(manual)notify('正在连接微信后台…');
+ refreshing=true;const version=revision;
+ try{
+  const next=await api('/api/state');if(busy||demo||version!==revision)return;
+  if(next.pending){
+   if(!state.connected){state={...state,detail:next.detail};render();}
+   if(manual)notify(next.detail);
+   return;
+  }
+  applyState(next);
+  if(next.connected)$('syncTime').textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  if(manual)notify(next.connected?'已更新本机记录。':next.detail);
+ }catch(error){applyState({connected:false,sessions:[],records:[],canSend:false,detail:error.message});if(manual)notify(error.message);}
+ finally{refreshing=false;}
+}
 async function selectProject(project){
  if(busy)return;
  if(demo){showDemo(project.id);return;}
@@ -461,7 +486,7 @@ $('draft').addEventListener('paste',event=>{
  attachImage(files[0]);
 });
 $('search').oninput=()=>{directoryResults=null;renderProjects();};$('search').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();searchContacts();}};$('searchContacts').onclick=searchContacts;$('clearDirectory').onclick=clearDirectory;$('recordSearch').oninput=renderRecords;
-for(const id of ['refreshSide','refreshButton','connectButton','settingsReconnect'])$(id).onclick=()=>{if(demo)exitDemo();else refresh(true);};
+for(const id of ['refreshSide','refreshButton','connectButton','settingsReconnect'])$(id).onclick=()=>{if(demo)exitDemo();else {stopped=false;refresh(true);}};
 for(const id of ['demoButton','settingsDemo'])$(id).onclick=()=>{$('settings').close();showDemo();};
 $('exitDemo').onclick=exitDemo;
 $('recordsNav').onclick=() =>setPage('records');$('notesNav').onclick=()=>setPage('notes');$('returnButton').onclick=()=>setPage('records');$('privacyButton').onclick=()=>setPage(page==='records'?'notes':'records');

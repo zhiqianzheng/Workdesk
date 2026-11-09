@@ -14,10 +14,18 @@ def context_for(rows, received, root, base, request):
     latest = max(row.get('createdAt', '') for row in received)
     targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row)}
     ordered = sorted(rows, key=lambda row: (row.get('createdAt', ''), str(row.get('serverId', ''))))
+    recent = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
+              and row.get('createdAt', '') <= latest][-12:]
+    # A text follow-up ("which of these two?") needs the preceding pictures too.
+    # Prioritize new attachments; historical pictures fill the remaining budget.
+    history = [row['id'] for row in recent if row.get('direction') == 'incoming'
+               and row.get('type') == 3 and row['id'] not in targets]
+    historical = set(history[-max(0, 4 - len(targets)):]) if len(targets) < 4 else set()
+    included = targets | historical
     candidates = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
                   and row.get('createdAt', '') <= latest
-                  and (row.get('type') == 1 or row.get('id') in targets)][-12:]
-    selected = {row['id'] for row in candidates if row.get('id') in targets}
+                  and (row.get('type') == 1 or row.get('id') in included)][-12:]
+    selected = {row['id'] for row in candidates if row.get('id') in included}
     if targets - selected or len(selected) > 4:
         raise ValueError('Too many incoming images in one reply; no image silently omitted')
     previews = Previews(SimpleNamespace(root=root, base=base, request=request))

@@ -20,16 +20,27 @@ def key(value):
     return hashlib.sha256(value.encode()).hexdigest()[:24]
 
 
+SUBSCRIPTIONS = '__workdesk_subscriptions__'
+
+
 class NativeConnection:
     def __init__(self, settings):
         self.root = Path(settings['directory'])
         self.account = settings['account']
         self.base = 'http://127.0.0.1:6175/v1/accounts/' + urllib.parse.quote(self.account, safe='') + '/'
         self.selected = None
+        self.directory_only = False
+        self.directory_view = 'root'
         self.known = {}
         self.cursor = None
         self.history = False
         self.rows = []
+        self.directory = {}
+        self.directory_scan = {}
+        self.directory_cursor = None
+        self.directory_scanning = False
+        self.directory_pages = 0
+        self.directory_refresh_at = 0
         from native_images import Previews
         self.previews = Previews(self)
 
@@ -39,15 +50,22 @@ class NativeConnection:
             headers['Content-Type'] = 'application/json'
         if request_id:
             headers['idempotency-key'] = request_id
-        req = urllib.request.Request(self.base + path, headers=headers,
+        req = urllib.request.Request(self.base + path if path else self.base.rstrip('/'), headers=headers,
                                      data=None if data is None else json.dumps(data).encode())
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=8) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=20) as response:
             return json.load(response)
+
+    @staticmethod
+    def public_account(info):
+        ident = info.get('id') or info.get('username') or ''
+        return info.get('kind') != 'group' and (
+            ident.startswith(('gh_', 'gh-')) or
+            (info.get('classification') or {}).get('category') == 'business')
 
     @staticmethod
     def writable(info):
         category = (info.get('classification') or {}).get('category')
-        return info.get('id') == 'filehelper' or (info.get('kind') in ('direct', 'group') and category not in ('business', 'system'))
+        return info.get('id') == 'filehelper' or (info.get('kind') in ('direct', 'group') and category not in ('business', 'system') and not NativeConnection.public_account(info))
 
     def session(self, info):
         ident = info.get('id') or info['username']
@@ -58,7 +76,21 @@ class NativeConnection:
         return {'id': ident, 'key': key(ident), 'name': name, 'preview': last.get('text') or '',
                 'time': last.get('createdAt', ''), 'unreadCount': info.get('unreadCount') or 0,
                 'unreadLabel': str(info.get('unreadCount') or '') or '',
-                'muted': bool(info.get('muted'))}
+                'muted': bool(info.get('muted')), 'publicAccount': self.public_account(info)}
+
+    def visible_directory(self, sessions):
+        subscriptions = [s for s in sessions if s.get('publicAccount')]
+        if self.directory_view == 'subscriptions':
+            return subscriptions
+        ordinary = [s for s in sessions if not s.get('publicAccount')]
+        if subscriptions:
+            unread = sum(s.get('unreadCount', 0) for s in subscriptions)
+            ordinary.insert(0, {'id': SUBSCRIPTIONS, 'key': key(SUBSCRIPTIONS),
+                'name': '公众号', 'folder': 'subscriptions',
+                'preview': '%s 个公众号 · 点击进入' % len(subscriptions),
+                'time': '', 'unreadCount': unread, 'unreadLabel': str(unread) if unread else '',
+                'muted': False})
+        return ordinary
 
     def info(self):
         try:
@@ -88,19 +120,50 @@ class NativeConnection:
                             'direction': row.get('direction'), 'kind': 'file' if is_file(row) else 'image' if row.get('type') == 3 else 'text'})
         self.rows = records + self.rows if cursor else records
 
+    def refresh_directory(self):
+        """Read one page per snapshot, keeping already loaded contacts visible."""
+        now = time.monotonic()
+        if now < self.directory_refresh_at:
+            return
+        if not self.directory_scanning:
+            self.directory_scan = {}
+            self.directory_cursor = None
+            self.directory_pages = 0
+            self.directory_scanning = True
+        path = 'threads?limit=100'
+        if self.directory_cursor:
+            path += '&cursor=' + urllib.parse.quote(self.directory_cursor, safe='')
+        # Back off transient failures without discarding the current page/cursor.
+        self.directory_refresh_at = now + 5
+        page = self.request(path)
+        for info in page['items']:
+            self.directory_scan[info['id']] = info
+        self.directory_cursor = page.get('nextCursor')
+        self.directory_pages += 1
+        if self.directory_cursor and self.directory_pages < 20:
+            # Newest pages first; keep older cached contacts until this scan ends.
+            self.directory = {**self.directory_scan, **{
+                ident: info for ident, info in self.directory.items()
+                if ident not in self.directory_scan}}
+            self.directory_refresh_at = time.monotonic() + 1
+        else:
+            self.directory = dict(self.directory_scan)
+            self.directory_scanning = False
+            self.directory_refresh_at = time.monotonic() + 15
+
     def snapshot(self):
+        account = None
         try:
-            sessions = []
-            cursor = None
-            for _ in range(20):
-                path = 'threads?limit=100' + ('&cursor=' + urllib.parse.quote(cursor, safe='') if cursor else '')
-                page = self.request(path)
-                sessions.extend(self.session(info) for info in page['items'])
-                cursor = page.get('nextCursor')
-                if not cursor:
-                    break
-            if not self.selected and sessions:
-                self.selected = sessions[0]['id']
+            account = self.request('')
+            if not account.get('authenticated'):
+                return self.unavailable('微信尚未登录或登录已失效，请在桌面控制台扫码登录。', False)
+            if account.get('connection') != 'online':
+                return self.unavailable('微信已登录，但后台连接尚未就绪，请稍候重试。', True)
+            self.refresh_directory()
+            sessions = [self.session(info) for info in self.directory.values()]
+            ordinary = [s for s in sessions if not s.get('publicAccount')]
+            if not self.selected and ordinary and not self.directory_only and self.directory_view == 'root':
+                self.selected = ordinary[0]['id']
             if self.selected:
                 info = self.info()
                 current = self.session(info)
@@ -111,20 +174,50 @@ class NativeConnection:
                 current = {'name': current['name'], 'key': current['key'], 'binding': key(self.selected)}
             else:
                 info, current = {}, None
-            return {'connected': True, 'mode': 'native', 'sessions': sessions, 'current': current,
+            return {'connected': True, 'authenticated': True, 'mode': 'native',
+                    'directoryLoading': self.directory_scanning,
+                    'directoryView': self.directory_view,
+                    'sessions': self.visible_directory(sessions), 'current': current,
                     'records': self.previews.enrich(self.rows), 'canSearch': True, 'canHistory': bool(current),
-                    'canGoBack': False, 'canSend': bool(current) and self.writable(info),
+                    'canGoBack': self.directory_view != 'root' or bool(current), 'canSend': bool(current) and self.writable(info),
                     'canSendImage': bool(current) and self.writable(info), 'hasNativeDraft': False,
-                    'detail': 'Agent WeChat 原生后台连接',
+                    'detail': 'Agent WeChat 已登录；会话目录正在分批加载。' if self.directory_scanning else 'Agent WeChat 原生后台连接',
                     'sendNote': '文字和图片通过后台接口发送；手动聊天时可先暂停 AI。语音请在手机查看。'}
-        except Exception:
-            return {'connected': False, 'mode': 'native', 'sessions': [], 'records': [],
-                    'canSend': False, 'detail': 'Agent WeChat 暂时不可用，请检查本机服务及登录状态；不会切换到前台自动操作。'}
+        except TimeoutError:
+            detail = '微信已登录，但读取会话超时，正在重试。' if account else '微信后台响应超时，请稍后重试。'
+        except urllib.error.HTTPError as error:
+            detail = ('本机后台访问凭据无效，请从桌面控制台重新准备后台。' if error.code in (401, 403)
+                      else '微信后台接口返回错误（HTTP %s），请稍后重试。' % error.code)
+        except (urllib.error.URLError, OSError):
+            detail = '无法访问本机微信后台，请在桌面控制台检查后台运行状态。'
+        except (ValueError, KeyError, TypeError):
+            detail = '微信后台返回的数据格式不兼容，请检查后台组件版本。'
+        return self.unavailable(detail, bool(account and account.get('authenticated')))
+
+    @staticmethod
+    def unavailable(detail, authenticated):
+        return {'connected': False, 'authenticated': authenticated, 'mode': 'native',
+                'sessions': [], 'records': [], 'canSend': False, 'detail': detail}
 
     def select(self, ident):
+        if ident == SUBSCRIPTIONS:
+            self.directory_view = 'subscriptions'
+            self.directory_only = True
+            self.selected, self.history, self.rows, self.cursor = None, False, [], None
+            return self.snapshot()
         if ident not in self.known:
             raise ValueError('请先从目录或搜索结果选择联系人。')
+        self.directory_only = False
+        self.directory_view = 'subscriptions' if self.public_account(self.known[ident]) else 'root'
         self.selected, self.history, self.rows, self.cursor = ident, False, [], None
+        return self.snapshot()
+
+    def navigate_back(self):
+        # Native mode has no foreground window to navigate: return to our root
+        # directory, and keep it selected across subsequent background polls.
+        self.directory_only = True
+        self.directory_view = 'root'
+        self.selected, self.history, self.rows, self.cursor = None, False, [], None
         return self.snapshot()
 
     def search(self, query):
@@ -201,6 +294,16 @@ class NativeAI:
                 return False
             try:
                 os.kill(pid, 0)
+                if sys.platform.startswith('linux'):
+                    try:
+                        # kill(pid, 0) also succeeds for an exited, unreaped child.
+                        status = Path('/proc/%s/stat' % pid).read_text().rsplit(')', 1)[1].split()[0]
+                        if status in ('Z', 'X'):
+                            return False
+                    except FileNotFoundError:
+                        return False
+                    except (OSError, IndexError):
+                        pass  # A restricted procfs is not proof that a process exited.
                 return True
             except ProcessLookupError:
                 return False
@@ -227,11 +330,11 @@ class NativeAI:
     def __init__(self, settings, config_path):
         self.root = Path(settings['directory'])
         self.config_path = config_path
-        self.config = {'allContacts': True}
+        self.config = {'allContacts': True, 'webSearch': False}
         config_file = self.root / 'private-data/workdesk-native-ai.json'
         if config_file.exists():
             saved = json.loads(config_file.read_text(encoding='utf-8'))
-            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', [])}
+            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False)}
         self.lifecycle_lock = threading.Lock()
         self.start_requested = 0
         if (self.root / 'private-data/watchdog.enabled').exists():
@@ -250,6 +353,13 @@ class NativeAI:
                          cwd=self.root, **background())
 
     def public(self):
+        # The desktop can save a new scope while this viewer remains open.
+        try:
+            saved = json.loads((self.root / 'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+            self.config = {'allContacts': saved.get('allContacts', False),
+                           'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False)}
+        except (OSError, ValueError):
+            pass
         status_path = self.root / 'private-data/global-status.json'
         status = json.loads(status_path.read_text()) if status_path.exists() else {}
         stopping = (self.root / 'private-data/global.stop').exists()
@@ -260,8 +370,10 @@ class NativeAI:
                          '原生 AI 监听进程已退出，等待后台守护恢复或手动恢复。' if not alive else
                          '原生 AI 心跳超时，进程仍在；暂无法确认正常回复。')
         return {'backend': 'native', 'enabled': active, 'allContacts': self.config['allContacts'], 'contacts': self.config.get('contacts', []),
-                'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True,
+                'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False),
                 'status': ('原生后台 AI 已开启，按已配置的接管范围回复。' if active else inactive_note) +
+                          (' 已启用按需联网检索。' if self.config.get('webSearch') else '') +
+                          (' 已启用图片回复。' if self.config.get('mediaReplies') else '') +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
                 'metrics': {'replies': status.get('replies', 0)},
                 'health': {'state': 'ready' if active else 'off', 'scanAgeSeconds': round(age, 1)}}
