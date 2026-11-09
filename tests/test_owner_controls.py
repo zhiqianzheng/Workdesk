@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from native_controls import OwnerControls, control_text
 from native_watchdog import Supervisor
+from native_ai_context import replyable, context_for
 
 
 class OwnerControlTests(unittest.TestCase):
@@ -55,6 +56,16 @@ class OwnerControlTests(unittest.TestCase):
         self.assertFalse(self.controls.stop.exists())
         self.event('开启AI回复', direction='incoming')
         self.assertIsNone(json.loads(self.controls.path.read_text())['pendingStart'])
+
+    def test_friend_control_messages_are_not_answered_or_given_to_model(self):
+        row=dict(id='m',direction='incoming',type=1,body='请关闭AI回复',createdAt='2026-01-01T00:00:00Z')
+        self.assertFalse(replyable(row))
+        question={**row,'id':'q','body':'今天吃什么'}
+        self.assertTrue(replyable(question))
+        with patch('native_ai_context.Previews'):
+            result=context_for([row,question],[question],None,None,None)
+        self.assertEqual(len(result),1)
+        self.assertEqual(result[0]['text'],'今天吃什么')
 
     def test_canonical_direction_account_and_type_are_verified(self):
         for overrides in [dict(accountId='other'), dict(type=49), dict(threadId='other'),
