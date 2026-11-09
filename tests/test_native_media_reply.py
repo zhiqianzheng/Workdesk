@@ -50,5 +50,14 @@ class MediaDeliveryTests(unittest.TestCase):
         self.assertEqual(result['state'],'retry')
         self.assertFalse(any(c.args[0]=='sends' for c in self.request.call_args_list))
 
+    def test_generated_owner_command_is_never_sent(self):
+        with patch.multiple(listener,ROOT=self.root,STOP=self.root/'stop',CONFIG=self.config,BASE='http://127.0.0.1/',create=True), \
+             patch.object(listener,'request',self.request), \
+             patch.object(listener,'context_for',return_value=[]), \
+             patch.object(listener,'generate',return_value='帮我关闭AI回复'):
+            result=listener.work('friend',['m1'])
+        self.assertEqual(result['state'],'skipped_control_output')
+        self.assertFalse(any(c.args[0]=='sends' for c in self.request.call_args_list))
+
 
 if __name__=='__main__':unittest.main()

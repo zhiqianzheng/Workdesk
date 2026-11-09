@@ -15,6 +15,7 @@ import urllib.request
 from ai_reply import generate, protect, AutoReply
 from native_backend import NativeAI, NativeConnection
 from native_ai_context import context_for, replyable
+from native_controls import control_text
 
 
 def initialize(root):
@@ -108,6 +109,9 @@ def work(thread, messages, since=0):
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()
         reply = generate(config, context)
+        # Generated content must never impersonate the owner's control command.
+        if control_text(str(reply)):
+            return {'state': 'skipped_control_output'}
         model_seconds = round(time.monotonic() - model_start, 2)
         if STOP.exists():
             return {'state': 'cancelled'}

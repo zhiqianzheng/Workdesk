@@ -9,6 +9,7 @@ import time
 
 from native_backend import NativeAI
 from native_process import command
+from native_controls import OwnerControls
 
 
 class Supervisor:
@@ -19,16 +20,25 @@ class Supervisor:
         self.next_start = 0
         self.attempts = 0
         self.healthy_since = None
+        self.controls = OwnerControls(root)
 
     def tick(self):
+        if not (self.private / 'watchdog.enabled').exists():
+            return 'disabled'
+        # Command monitoring must survive pause and must not require an LLM.
+        try:
+            self.controls.poll()
+            self.control_error = None
+        except Exception as error:
+            self.control_error = type(error).__name__
+        path = self.private / 'global-status.json'
+        status = json.loads(path.read_text()) if path.exists() else {}
+        alive = NativeAI.process_alive(status.get('pid'))
+        self.controls.resume_if_ready(alive or (self.child is not None and self.child.poll() is None))
         if (self.private / 'global.stop').exists():
             self.healthy_since = None
             return 'paused'
-        if not (self.private / 'watchdog.enabled').exists():
-            return 'disabled'
         # Missing/invalid status is ambiguous: do not risk a second listener.
-        status = json.loads((self.private / 'global-status.json').read_text())
-        alive = NativeAI.process_alive(status.get('pid'))
         if alive or (self.child is not None and self.child.poll() is None):
             if time.time() - status.get('updatedAt', 0) < 60:
                 self.healthy_since = self.healthy_since or time.monotonic()
@@ -73,7 +83,8 @@ def main(root):
             try:
                 temp = guard.private / 'watchdog-status.tmp'
                 temp.write_text(json.dumps({'pid': os.getpid(), 'state': state,
-                                           'updatedAt': time.time(), 'attempts': guard.attempts}))
+                                           'updatedAt': time.time(), 'attempts': guard.attempts,
+                                           'controlError': getattr(guard, 'control_error', None)}))
                 os.replace(temp, guard.private / 'watchdog-status.json')
             except OSError:
                 pass
