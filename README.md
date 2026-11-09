@@ -4,9 +4,9 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 提供两种接入方式：默认通过 Windows UI Automation 读取已登录的电脑版微信，文字控件不可用时尝试本地 OCR；可选 Agent WeChat 原生后台连接，通过本机 HTTP 接口收发消息，不操作桌面鼠标、键盘或剪贴板。本项目不是微信官方网页版。
 
-**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.5)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
+**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.6)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
 
-> v1.1.0-preview.5 同时提供 Windows x64 便携 ZIP 和 Ubuntu amd64 DEB。两者共享连接修复、目录导航、AI 联网与聊天表达代码；Windows 包由 Windows runner 构建并进行依赖自检。真实微信收发兼容性仍需在目标电脑验证，不含 WindowOpacity。
+> v1.1.0-preview.6 同时提供 Windows x64 便携 ZIP 和 Ubuntu amd64 DEB。两者共享连接修复、目录导航、AI 联网与聊天表达代码；Windows 包由 Windows runner 构建并进行依赖自检。真实微信收发兼容性仍需在目标电脑验证，不含 WindowOpacity。
 
 ## 新版桌面控制台
 
@@ -20,7 +20,7 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 | --- | --- |
 | ![桌面连接页](docs/screenshots/desktop/connection.png) | ![桌面状态页](docs/screenshots/desktop/status.png) |
 
-## preview.5 更新与平台范围
+## preview.6 更新与平台范围
 
 - 修复后台重启后旧网页凭据失效、点击“重新连接”仍无法恢复的问题。同源页面自动取得当前凭据并重试；不开放跨站获取凭据，也不要求退出微信。服务完全退出时仍需桌面入口启动。
 - 修复慢请求结果丢失与联系人目录全量读取造成的长时间等待；目录逐页加载。
@@ -42,7 +42,7 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## 桌面控制台（本地预览版）
 
-新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.5 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
+新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.6 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
 
 - 后台模式：自动准备本机服务 → 扫码登录 → 打开工作台；AI 在控制台中配置，选择联系人或群聊，保存后默认暂停，确认授权再点击开启。
 - 官方窗口模式：选择对应选项，自行登录电脑版微信，然后打开工作台；AI 配置使用网页内的设置。
@@ -54,14 +54,14 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## Ubuntu 安装与使用（x64 预览版）
 
-[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.5/Workdesk_1.1.0-preview.5_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk#ubuntu-安装与使用x64-预览版)
+[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.6/Workdesk_1.1.0-preview.6_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk#ubuntu-安装与使用x64-预览版)
 
 面向 Ubuntu 22.04 / 24.04 **amd64（x86_64）桌面环境**，不适用于 ARM64。已在 WSL Ubuntu 22.04 / Python 3.10 中验证安装、Tk 界面、本地后台接口、钥匙串及暂停保护；Ubuntu 24.04 和独立 Ubuntu 桌面的真实扫码、文字/图片收发、AI 回复仍待实测，当前为预览版。
 
 在下载目录打开终端执行：
 
 ```bash
-sudo apt install ./Workdesk_1.1.0-preview.5_amd64.deb
+sudo apt install ./Workdesk_1.1.0-preview.6_amd64.deb
 ```
 
 安装后从应用菜单打开 **Workdesk**，或运行 `workdesk`。使用普通桌面用户启动，不要用 `sudo workdesk`。
@@ -93,6 +93,24 @@ API 密钥由 Secret Service 系统钥匙串保存，首次使用可能要求解
 python3 -m unittest discover -s tests -v
 node tests/test_refresh.cjs
 ```
+
+## 首次配置：模型列表与连通性测试
+
+桌面 AI 配置页增加「获取模型列表」和「测试对话连接」。获取列表使用当前填写 URL 对应的 `/models`，无需先登录微信；模型 ID 支持下拉选择或手动填写。模型列表只代表服务列出的 ID，不保证每个 ID 都可用于文字对话。没有列表接口时仍可手动填写。
+
+对话测试向当前模型发送一条独立的简短测试请求，成功显示耗时；可能使用少量额度，不提交微信聊天内容。界面区分密钥/权限错误、404、限流或额度限制、网络超时及不兼容响应。它只验证当前文字接口，不保证联网、图片或图像生成功能可用。测试不自动保存配置，也不启动自动回复。若切换了服务地址且密钥留空，不会把已保存的旧密钥发送给新服务。
+
+## 桌面真实连接状态
+
+控制台重新打开时会恢复本机配置中的账号，使用带本机凭据的后台接口读取状态。已运行的合法后台直接复用，不因进程归属检查失败重复启动。后台就绪、微信已登录但连接中、微信在线、AI暂停/运行/异常分别展示；完成的准备与扫码按钮改为对应完成状态并禁用。连接检查在后台线程执行，不阻塞桌面界面。
+
+## 视频画面分析与视频号边界
+
+在原生后台模式可选开启「分析收到的 MP4 视频画面」。直接收到的视频附件会核对会话、文件大小及 SHA-256，再从最多 3 分钟、50 MB 的 MP4 均匀抽取最多四帧，提交给支持图片输入的模型。**这只是抽帧画面分析，没有音轨或语音转写，也不保证覆盖瞬时事件。** 每次最多分析一个视频；不能下载、格式不支持或超过限制时明确说明，不猜测内容。视频文本与字幕不能授权程序操作。原始临时文件在处理后删除，底层后台的媒体缓存按其规则保留。
+
+视频号分享卡片（49/51）与普通视频附件不同。当前 Agent WeChat v2.2.0 仅提供作者、文案和随卡片附带的链接，不提供视频号播放资源；某些卡片只有微信更新占位链接。Workdesk 会标明「仅卡片元数据，未读取视频」，不能声称观看或听到内容。请直接发送原视频附件后分析；任意网页视频链接、视频号解密/登录解析暂未实现。上游说明：https://thisnick.github.io/agent-wechat/how-it-works/message-types/#link-cards
+
+发行包包含固定版本 imageio-ffmpeg/FFmpeg 视频解码组件与许可说明。抽帧仅使用本地收到的 MP4，不跟随视频中的外部网络资源。首次配置默认关闭，视频帧会提交至你选定的模型服务；当前用户主动授权开启后才处理。
 
 ## 本人微信口令：全局暂停与恢复（原生后台模式）
 
@@ -425,7 +443,7 @@ cd D:\AgentWeChat
 
 本项目为非官方界面辅助工具，与腾讯或微信官方无关联。
 
-## 构建 preview.5 发行包
+## 构建 preview.6 发行包
 
 构建只收集源码、网页、第三方许可证和校验后的 Agent WeChat v2.2.0，不读取本机运行目录。Windows 与 Linux 均在目标平台原生打包：
 
@@ -440,6 +458,6 @@ python -m pip install -r scripts/requirements-windows.txt
 python scripts/build_release.py windows
 ```
 
-输出位于 `dist/`，每个包附 `.sha256`。Windows 构建会在独立用户数据目录执行包内自检。GitHub Actions 的 `Build desktop releases` 同时运行两平台回归测试和构建；推送 `v1.1.0-preview.5` 标签后，两平台构建均成功才发布预览 Release。
+输出位于 `dist/`，每个包附 `.sha256`。Windows 构建会在独立用户数据目录执行包内自检。GitHub Actions 的 `Build desktop releases` 同时运行两平台回归测试和构建；推送 `v1.1.0-preview.6` 标签后，两平台构建均成功才发布预览 Release。
 
 测试：`python -m unittest discover -s tests -v` 与 `node tests/test_refresh.cjs`。自动化测试使用合成数据，不向微信联系人发送消息，也不能代替目标机器上的扫码与真实收发验收。

@@ -104,7 +104,7 @@ def work(thread, messages, since=0):
                         datetime.fromisoformat(row['createdAt'].replace('Z', '+00:00')).timestamp() >= since]
             if not received:
                 return {'state': 'skipped_old_history'}
-        context = context_for(rows, received, ROOT, BASE, request)
+        context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False))
         config = dict(CONFIG)
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()

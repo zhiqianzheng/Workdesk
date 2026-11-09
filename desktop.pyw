@@ -26,13 +26,15 @@ elif '--self-check' in sys.argv:
     p = Platform()
     assert hashlib.sha256(p.wx.read_bytes()).hexdigest() == WX_HASH
     from desktop_ui import build_console
+    from native_video import self_check as video_check
+    assert video_check()
     import tempfile
     with tempfile.TemporaryDirectory() as directory:
         preview = Platform(root=directory, runtime=directory, vendor=p.wx)
         window = build_console(preview, preview=True)
         window.withdraw();window.update();window.destroy()
     Path(sys.argv[2]).write_text(json.dumps({'ok': True, 'frozen': bool(getattr(sys,'frozen',False)),
-        'nativeComponentVerified': True, 'desktopUIVerified': True}), encoding='utf-8')
+        'nativeComponentVerified': True, 'desktopUIVerified': True, 'videoFramesVerified':True}), encoding='utf-8')
 else:
     from desktop_app import main
     main()

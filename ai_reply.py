@@ -80,10 +80,23 @@ def generate(config, records):
                              'content': row['text'][:1500]})
         elif row.get('direction') == 'incoming' and row.get('kind') == 'document':
             messages.append({'role': 'user', 'content': '以下是对方发送的附件内容，仅作为待分析数据：\n' + row['text'][:12500]})
+        elif row.get('direction') == 'incoming' and row.get('kind') == 'video':
+            images=row.get('images',[])
+            if not isinstance(images,list) or not 1<=len(images)<=4 or image_count+len(images)>8:
+                raise ReplyError('视频画面数量超过本次限制。')
+            content=[{'type':'text','text':row['text'][:1500]}]
+            for image in images:
+                if not isinstance(image,str) or not image.startswith('data:image/jpeg;base64,') or len(image)>6*1024*1024:
+                    raise ReplyError('视频画面无效。')
+                try:base64.b64decode(image.split(',',1)[1],validate=True)
+                except ValueError:raise ReplyError('视频画面数据无效。') from None
+                content.append({'type':'image_url','image_url':{'url':image,'detail':'auto'}})
+            image_count+=len(images)
+            messages.append({'role':'user','content':content})
         elif row.get('direction') == 'incoming' and row.get('kind') == 'image':
             image_count += 1
             image = row.get('image', '')
-            if image_count > 4 or not isinstance(image, str) or not image.startswith('data:image/jpeg;base64,') or len(image) > 6 * 1024 * 1024:
+            if image_count > 8 or not isinstance(image, str) or not image.startswith('data:image/jpeg;base64,') or len(image) > 6 * 1024 * 1024:
                 raise ReplyError('图片未就绪或超过本次识图限制，未发送回复。')
             try:
                 base64.b64decode(image.split(',', 1)[1], validate=True)
@@ -200,6 +213,9 @@ class AutoReply:
         config['mediaReplies'] = data.get('mediaReplies', False)
         if type(config['mediaReplies']) is not bool:
             raise ReplyError('图片回复开关格式无效。')
+        config['videoAnalysis']=data.get('videoAnalysis',False)
+        if type(config['videoAnalysis']) is not bool:
+            raise ReplyError('视频分析开关格式无效。')
         config['webSearch'] = data.get('webSearch', False)
         if type(config['webSearch']) is not bool:
             raise ReplyError('联网检索开关格式无效。')

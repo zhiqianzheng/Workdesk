@@ -11,7 +11,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist'
-VERSION = '1.1.0-preview.5'
+VERSION = '1.1.0-preview.6'
 HASHES = {'windows': '01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c',
           'linux': '0b59f03ace18358d0606df1eb15e0495016aabe07208da8c45dc785b70de93b3'}
 
@@ -52,6 +52,9 @@ def linux():
         shutil.rmtree(stage)
     app = stage / 'usr/lib/workdesk'
     copy_app(app)
+    from install_video_tools import install
+    install(app / '_vendor')
+    subprocess.run([sys.executable,'-c','from native_video import self_check; assert self_check()'],cwd=app,check=True)
     shutil.copytree(vendor, app / 'vendor/agent-wechat', ignore=shutil.ignore_patterns('wx.exe'))
     control = stage / 'DEBIAN'
     control.mkdir()
@@ -94,7 +97,7 @@ def windows():
         command += ['--hidden-import', source.stem]
     for name in ('web', 'third_party', 'assets', 'vendor/agent-wechat'):
         command += ['--add-data', str(ROOT / name) + os.pathsep + name]
-    for name in ('uiautomation', 'comtypes', 'winsdk', 'windows_capture'):
+    for name in ('uiautomation', 'comtypes', 'winsdk', 'windows_capture', 'imageio_ffmpeg'):
         command += ['--collect-all', name]
     command += [str(ROOT / 'desktop.pyw')]
     subprocess.run(command, cwd=ROOT, check=True)

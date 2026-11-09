@@ -32,15 +32,15 @@ def image_bytes(encoded):
     return out.getvalue()
 
 
-def binary(connection, path, body=None, content_type=None):
+def binary(connection, path, body=None, content_type=None, max_bytes=32 * 1024 * 1024):
     headers = {'Authorization': 'Bearer ' + (connection.root / 'private-data/api-token').read_text().strip()}
     if content_type:
         headers['Content-Type'] = content_type
     req = urllib.request.Request(connection.base + path, data=body, headers=headers)
     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=30) as response:
-        raw = response.read(32 * 1024 * 1024 + 1)
-    if len(raw) > 32 * 1024 * 1024:
-        raise ValueError('图片资源过大。')
+        raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError('媒体资源过大。')
     return raw
 
 

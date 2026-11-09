@@ -62,6 +62,9 @@ def build_console(platform=None, preview=False):
     style.configure('Vertical.TScrollbar', background='#c9d8d5', troughcolor=BG, borderwidth=0, width=9)
     style.configure('Horizontal.TProgressbar', background=TEAL, troughcolor=BG, borderwidth=0)
     events = queue.Queue()
+    health_events = queue.Queue()
+    health_busy = False
+    cached_connection = {}
     busy = False
     widgets, contacts = [], []
     status = tk.StringVar(value='准备后台、扫码登录，然后打开工作台。AI 自动回复可按需开启。')
@@ -142,7 +145,7 @@ def build_console(platform=None, preview=False):
             ttk.Label(frame, text=caption, style='Muted.TLabel', wraplength=690).pack(anchor='w', pady=(5, 14))
         return frame
 
-    def task(fn, done=None):
+    def task(fn, done=None, failed=None):
         nonlocal busy
         if busy:return
         busy = True
@@ -153,7 +156,7 @@ def build_console(platform=None, preview=False):
         def run():
             try:events.put((True, fn(), done))
             except Exception as error:
-                events.put((False, str(error) if isinstance(error, ValueError) else '操作失败，请检查网络或重试。', None))
+                events.put((False, str(error) if isinstance(error, ValueError) else '操作失败，请检查网络或重试。', failed))
         threading.Thread(target=run, daemon=True).start()
 
     def button(parent, text, callback, kind='TButton'):
@@ -172,6 +175,7 @@ def build_console(platform=None, preview=False):
     def prepared(online):
         connection_note.set('微信已登录，可以打开工作台。' if online else '后台已准备好，请扫码并在手机上确认登录。')
         status.set(connection_note.get())
+        update_health(False)
     controls = []
     for i, (heading, description, text, callback) in enumerate([
         ('01  准备后台', '检查并启动本机连接服务', '准备后台', lambda: task(platform.prepare, prepared)),
@@ -195,9 +199,25 @@ def build_console(platform=None, preview=False):
                                   ('style','回复风格','自然口语化，简短友好，根据话题回复。')]:
         row = ttk.Frame(api, style='Card.TFrame');row.pack(fill='x', pady=5)
         ttk.Label(row, text=label, width=10, style='Card.TLabel').pack(side='left')
-        entry = ttk.Entry(row, show='●' if name == 'apiKey' else '')
+        entry = ttk.Combobox(row, values=[]) if name=='model' else ttk.Entry(row, show='●' if name == 'apiKey' else '')
         entry.insert(0, saved.get(name, default) if name != 'apiKey' else '')
         entry.pack(side='left', fill='x', expand=True);fields[name]=entry;widgets.append(entry)
+    diagnostics=ttk.Frame(api,style='Card.TFrame');diagnostics.pack(fill='x',pady=(12,5))
+    diagnostic_note=tk.StringVar(value='先获取模型列表，再测试文字对话；测试会发送一条很短的请求，可能使用少量额度。')
+    def check_api(models=False):
+        data={name:entry.get() for name,entry in fields.items()}
+        diagnostic_note.set('正在获取模型列表…' if models else '正在测试，请稍候…')
+        def done(result):
+            if models:
+                fields['model'].configure(values=result)
+                if not fields['model'].get() and len(result)==1:fields['model'].set(result[0])
+                diagnostic_note.set('已获取 %s 个模型，可在模型 ID 下拉框选择。模型列表不保证每个模型都可实际调用。'%len(result))
+            else:diagnostic_note.set(result)
+            status.set(diagnostic_note.get())
+        task(lambda:platform.api_check(data,models=models),done,diagnostic_note.set)
+    button(diagnostics,'测试对话连接',check_api)
+    button(diagnostics,'获取模型列表',lambda:check_api(True))
+    ttk.Label(api,textvariable=diagnostic_note,style='Muted.TLabel',wraplength=690).pack(anchor='w',pady=(5,0))
     scope = card(pages[1], '接管范围', '只回复你授权的好友和普通群聊，不回复公众号和系统通知。')
     all_chats = tk.BooleanVar(value=saved.get('allContacts', False))
     all_check = ttk.Checkbutton(scope, text='接管全部好友和普通群聊', variable=all_chats)
@@ -221,9 +241,11 @@ def build_console(platform=None, preview=False):
     capabilities = card(pages[1], '回复能力')
     web_search = tk.BooleanVar(value=saved.get('webSearch', False))
     media_replies = tk.BooleanVar(value=saved.get('mediaReplies', False))
+    video_analysis=tk.BooleanVar(value=saved.get('videoAnalysis',False))
     consent = tk.BooleanVar(value=False)
     for text, variable in [('按需联网查询天气、新闻等（需要服务支持）', web_search),
                            ('按请求生成图片和表情图片（使用图像额度）', media_replies),
+                           ('分析收到的 MP4 视频画面（抽帧，不含声音）', video_analysis),
                            ('允许向上述 API 提交接管会话，并自动发送生成的回复', consent)]:
         check = ttk.Checkbutton(capabilities, text=text, variable=variable)
         check.pack(anchor='w');widgets.append(check)
@@ -231,7 +253,7 @@ def build_console(platform=None, preview=False):
         if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中配置。');return
         data={name: entry.get() for name, entry in fields.items()}
         data.update(contacts=[contacts[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(),
-                    webSearch=web_search.get(), mediaReplies=media_replies.get(), interval=1)
+                    webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(), interval=1)
         def saved_ok(_):
             fields['apiKey'].delete(0, 'end');status.set('配置已保存，AI 保持暂停。确认授权后点击开启。')
         task(lambda: platform.save(data), saved_ok)
@@ -250,7 +272,7 @@ def build_console(platform=None, preview=False):
     ttk.Label(health, textvariable=summary, style='Card.TLabel', font=(family, 16, 'bold'), wraplength=680).pack(anchor='w', pady=(14, 8))
     ttk.Label(health, textvariable=details, style='Muted.TLabel', wraplength=680, justify='left').pack(anchor='w', pady=(0, 15))
     health_actions = ttk.Frame(health, style='Card.TFrame');health_actions.pack(fill='x')
-    button(health_actions, '立即检查', lambda: task(lambda: platform.ai().public(), show_health))
+    button(health_actions, '立即检查', lambda: task(platform.health, show_health))
     button(health_actions, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])), 'Danger.TButton')
     commands = card(pages[2], '在微信里，也能掌控助手', '仅响应你账号发出的口令；好友和群成员的开关及查询口令会被忽略。')
     for heading, example in [('暂停回复', '关闭AI回复 / 停止AI回复'), ('恢复回复', '打开AI回复 / 开启AI回复'),
@@ -261,24 +283,47 @@ def build_console(platform=None, preview=False):
     ttk.Label(commands, text='暂停后仍可查询、恢复。建议在文件传输助手中使用，查询结果会回复到发出口令的会话。',
               style='Muted.TLabel', wraplength=690).pack(anchor='w', pady=(12, 0))
     def show_health(value):
+        nonlocal cached_connection
+        cached_connection=value.get('connection', {})
         enabled=value.get('enabled', False)
-        badge.configure(text='●  AI 已开启' if enabled else '●  AI 已暂停', fg=TEAL if enabled else '#986b34',
-                        bg='#e0eee6' if enabled else '#f3ebdd')
+        online=cached_connection.get('online',False)
+        label=('微信已连接' if online else '已登录 · 连接中' if cached_connection.get('authenticated') else
+               '等待扫码' if cached_connection.get('serviceReady') else '后台未连接')
+        if mode.get()=='uia':label='官方窗口模式'
+        badge.configure(text='●  '+label, fg=TEAL if online else '#986b34',
+                        bg='#e0eee6' if online else '#f3ebdd')
         metrics=value.get('metrics', {})
-        summary.set(('部分会话需要核对' if metrics.get('blocked',0) else
-                     '正在处理新消息' if metrics.get('active',0) else '正在接管，等待新消息') if enabled else 'AI 当前未开启')
+        summary.set(('微信连接未就绪，暂不能自动回复' if not online else
+                     '监听异常，正在重试' if value.get('health',{}).get('state')!='ready' else
+                     '部分会话需要核对' if metrics.get('blocked',0) else
+                     '正在处理新消息' if metrics.get('active',0) else '正在接管，等待新消息') if enabled else 'AI 当前已暂停' if value.get('paused') else 'AI 监听未就绪或尚未开启')
         health_info=value.get('health', {})
         details.set(('本人口令：' + ('监听正常' if value.get('ownerCommands') else '未就绪')
                      + '    ·    累计回复：%s 条' % value.get('metrics', {}).get('replies', 0)
+                     + '\n\n微信连接：' + cached_connection.get('detail', '尚未检查')
                      + '\n\n' + value.get('status', '')
                      + '\n\n处理中 %s · 排队 %s · 待核对 %s' % (metrics.get('active',0),metrics.get('queued',0),metrics.get('blocked',0))
                      + '\n\n监听心跳：%s 秒前' % health_info.get('scanAgeSeconds', '—')))
+        if mode.get()=='native':connection_note.set(cached_connection.get('detail','正在检查后台状态…'))
+        if not busy and status.get().startswith('准备后台、扫码登录'):
+            status.set(cached_connection.get('detail','正在检查后台状态…'))
+        if mode.get()=='uia':summary.set('官方窗口模式的运行状态请在网页工作台查看')
+        sync_connection_buttons()
+
+    def sync_connection_buttons():
+        if busy:return
+        native=mode.get()=='native'
+        ready=cached_connection.get('serviceReady',False) and not cached_connection.get('errorKind') and not cached_connection.get('needsAccount')
+        authenticated=cached_connection.get('authenticated',False)
+        controls[0].configure(text='后台已就绪' if ready else '准备后台', state='disabled' if not native or ready else 'normal')
+        controls[1].configure(text='微信已登录' if cached_connection.get('online') else '已登录 · 连接中' if authenticated else '扫码登录',
+                              state='disabled' if not native or authenticated or not ready else 'normal')
     def mode_changed(*_):
         window_mode=mode.get()=='uia'
-        for b in controls[:2]:b.configure(state='disabled' if window_mode else 'normal')
+        sync_connection_buttons()
         if window_mode:
             connection_note.set('先登录官方电脑版微信，再打开工作台。此模式的 AI 在网页中配置。')
-        else:connection_note.set('原生后台模式：准备后台 → 扫码登录 → 打开工作台。')
+        else:connection_note.set(cached_connection.get('detail','正在检查本机后台…'))
     mode.trace_add('write', mode_changed)
     mode_changed();navigate(0)
     qr_window = tk.Toplevel(app)
@@ -290,15 +335,22 @@ def build_console(platform=None, preview=False):
     tk.Label(qr_window, text='请在自己的手机上确认登录', bg='white', fg=MUTED).pack(pady=14)
     qr_stamp=None
     def poll():
-        nonlocal busy, qr_stamp
+        nonlocal busy, qr_stamp, health_busy
         try:
             ok, result, done=events.get_nowait();busy=False;activity.stop();activity.pack_forget()
             for widget in widgets:widget.configure(state='normal')
             mode_changed();status.set('操作完成。' if ok else result)
-            if ok and done:
+            if done:
                 try:done(result)
                 except Exception:status.set('结果显示失败，请重新检查状态。')
             qr.configure(image='');qr.image=None;qr_window.withdraw()
+        except queue.Empty:pass
+        try:
+            ok, value=health_events.get_nowait();health_busy=False
+            if ok:show_health(value)
+            else:
+                show_health({'enabled':False,'connection':{'detail':value},'status':'无法确认 AI 状态，请稍后重试。'})
+                summary.set('状态检查失败，未确认连接或 AI 状态')
         except queue.Empty:pass
         path=platform.root/'login.png'
         if busy and path.exists():
@@ -310,24 +362,28 @@ def build_console(platform=None, preview=False):
                     qr.configure(image=photo);qr.image=photo;qr_stamp=stamp;qr_window.deiconify()
             except OSError:pass
         app.after(250, poll)
-    def update_health():
-        if not busy:
-            try:show_health(platform.ai().public())
-            except Exception:
-                badge.configure(text='●  尚未连接', bg='#e6eaeb', fg=MUTED)
-                summary.set('尚未配置或连接后台')
-        app.after(3000, update_health)
+    def update_health(repeat=True):
+        nonlocal health_busy
+        if not busy and not health_busy and mode.get()=='native':
+            health_busy=True
+            def check():
+                try:health_events.put((True,platform.health()))
+                except Exception:health_events.put((False,'本机后台状态读取失败。'))
+            threading.Thread(target=check,daemon=True).start()
+        if repeat:app.after(3000, update_health)
     def wheel(event):
         delta=-1 if getattr(event, 'num', None)==4 else 1 if getattr(event, 'num', None)==5 else -int(event.delta/120)
         canvases[notebook.index('current')].yview_scroll(delta, 'units')
     app.bind('<MouseWheel>', wheel);app.bind('<Button-4>', wheel);app.bind('<Button-5>', wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
                        consent=consent, start=start, save=save, canvases=canvases, selection=selection,
-                       webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats)
+                       webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats, videoAnalysis=video_analysis)
+    app.console.update(apply_health=show_health, connection_buttons=controls, badge=badge)
     if preview:
         show_health({'enabled':False, 'ownerCommands':True, 'metrics':{'replies':0},
                      'health':{'scanAgeSeconds':0}, 'status':'预览模式，不连接微信，也不发送消息。'})
     else:
         poll();update_health()
-        if mode.get()=='native':app.after(350, lambda: task(platform.prepare, prepared))
+        if mode.get()=='native':
+            app.after(350, lambda: None if cached_connection.get('serviceReady') else task(platform.prepare, prepared))
     return app

@@ -51,6 +51,75 @@ class Platform:
         self.wx = Path(vendor or Path(__file__).parent / 'vendor' / 'agent-wechat' / ('wx.exe' if os.name == 'nt' else 'wx'))
         self.account = None
         self.connection = None
+        # Reopening the console must not forget an already configured account.
+        try:
+            saved = json.loads((self.root / 'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+            if isinstance(saved.get('account'), str) and saved['account']:
+                self.account = saved['account']
+        except (OSError, ValueError):
+            pass
+
+    def connection_status(self):
+        """Read authenticated backend state without starting or re-owning it."""
+        import urllib.error
+        token_path = self.root / 'private-data/api-token'
+        if not token_path.exists():
+            return {'serviceReady': False, 'authenticated': False, 'online': False, 'detail': '后台尚未准备。'}
+        request = urllib.request.Request('http://127.0.0.1:6175/v1/accounts', headers={
+            'Authorization': 'Bearer ' + token_path.read_text().strip()})
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=4) as response:
+                items = json.load(response)['items']
+            if not items:
+                return {'serviceReady': True, 'authenticated': False, 'online': False, 'needsAccount': True,
+                        'detail': '后台已就绪，尚未创建账号。'}
+            if len(items) != 1:
+                return {'serviceReady': True, 'authenticated': False, 'online': False, 'errorKind': 'accounts',
+                        'detail': '此后台有多个账号，请使用独立数据目录。'}
+            account = items[0]
+            if not isinstance(account.get('id'), str) or not account['id']:
+                raise ValueError('Invalid account')
+            if self.account and self.account != account['id']:
+                return {'serviceReady': True, 'authenticated': False, 'online': False, 'errorKind': 'accounts',
+                        'detail': '后台账号与当前配置不一致，未切换接管账号。'}
+            if self.connection is None or self.account != account['id']:
+                if self.connection is not None:self.connection.close()
+                self.connection = NativeConnection({'directory': str(self.root), 'account': account['id']})
+            self.account = account['id']
+            authenticated = account.get('authenticated') is True
+            online = authenticated and account.get('connection') == 'online'
+            return {'serviceReady': True, 'authenticated': authenticated, 'online': online,
+                    'detail': '微信已登录，后台连接正常。' if online else
+                              '微信已登录，正在恢复后台连接。' if authenticated else '后台已就绪，等待扫码登录。'}
+        except urllib.error.HTTPError as error:
+            return {'serviceReady': False, 'authenticated': False, 'online': False,
+                    'errorKind': 'credentials' if error.code in (401,403) else 'incompatible',
+                    'detail': '后台凭据无效，请检查本机配置。' if error.code in (401,403) else '本机端口上的接口不兼容。'}
+        except (OSError, urllib.error.URLError):
+            return {'serviceReady': False, 'authenticated': False, 'online': False, 'detail': '暂时无法连接本机后台。'}
+        except (ValueError, KeyError, TypeError):
+            return {'serviceReady': False, 'authenticated': False, 'online': False, 'errorKind': 'incompatible',
+                    'detail': '后台状态格式不兼容，未确认连接成功。'}
+
+    def health(self):
+        connection = self.connection_status()
+        value = self.ai().public() if self.account else {'enabled': False, 'ownerCommands': False,
+                'status': '尚未配置 AI 自动回复。', 'health': {}, 'metrics': {}}
+        return {**value, 'connection': connection}
+
+    def api_check(self, data, models=False):
+        from api_diagnostics import list_models, test_chat
+        try:
+            saved=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        except (OSError,ValueError):saved={}
+        # Do not send a stored key to a newly typed provider URL.
+        from ai_reply import endpoint
+        if not data.get('apiKey') and saved.get('encryptedKey'):
+            try:normalized=endpoint(data.get('endpoint','').strip())
+            except Exception:raise ValueError('API 地址格式无效，请填写最终接口地址。') from None
+            if normalized != saved.get('endpoint'):
+                raise ValueError('服务地址已变更，请填写该服务的密钥后再测试，避免将旧密钥发送到新地址。')
+        return (list_models if models else test_chat)(data,saved)
 
     def cli(self, *args, timeout=40):
         result = subprocess.run([str(self.wx), '--server-config', str(self.root / 'server.toml'),
@@ -64,11 +133,17 @@ class Platform:
         if not self.wx.is_file() or hashlib.sha256(self.wx.read_bytes()).hexdigest() != WX_HASH:
             raise ValueError('缺少或损坏的后台组件，请完整解压官方组合包后重试。')
         self.root.mkdir(parents=True, exist_ok=True)
+        existing = self.connection_status()
+        if existing.get('errorKind'):
+            raise ValueError(existing['detail'])
+        if existing['serviceReady'] and not existing.get('needsAccount'):
+            return existing['online']
         private = self.root / 'private-data'
         # Generated for this installation only; never includes another user's profile.
         (self.root / 'server.toml').write_text('schemaVersion = 1\nlisten = "127.0.0.1:6175"\ndataDir = ' +
                                               json.dumps(str(private).replace('\\', '/')) + '\n', encoding='utf-8')
-        self.cli('daemon', 'start')
+        if not existing['serviceReady']:
+            self.cli('daemon', 'start')
         items = self.cli('accounts', 'list').get('items', [])
         if not items:
             self.cli('accounts', 'create', 'workdesk', '--alias', 'Workdesk')
@@ -127,6 +202,7 @@ class Platform:
                 data['apiKey'] = protect(old['encryptedKey'], decrypt=True)
             data.setdefault('webSearch', old.get('webSearch', False))
             data.setdefault('mediaReplies', old.get('mediaReplies', False))
+            data.setdefault('videoAnalysis',old.get('videoAnalysis',False))
             config = AutoReply.validate(data)
             if not config['allContacts'] and not config['contacts']:
                 raise ValueError('请选择至少一个接管对象，或明确选择全部好友与群聊。')

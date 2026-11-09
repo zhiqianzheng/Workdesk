@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from native_images import Previews
 from native_files import is_file, fetch_file, document_text
 from native_controls import control_text
+from native_video import is_video, is_channels, fetch_video, channels_context
 
 
 def replyable(row):
@@ -11,12 +12,13 @@ def replyable(row):
     if row.get('type') == 1 and control_text(row.get('body')):
         return False
     return row.get('direction') == 'incoming' and (
-        row.get('type') == 3 or is_file(row) or (row.get('type') == 1 and bool(row.get('body', '').strip())))
+        row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row)
+        or (row.get('type') == 1 and bool(row.get('body', '').strip())))
 
 
-def context_for(rows, received, root, base, request):
+def context_for(rows, received, root, base, request, video_enabled=False):
     latest = max(row.get('createdAt', '') for row in received)
-    targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row)}
+    targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row)}
     ordered = sorted(rows, key=lambda row: (row.get('createdAt', ''), str(row.get('serverId', ''))))
     ordered = [row for row in ordered if not (row.get('type') == 1 and control_text(row.get('body')))]
     recent = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
@@ -36,8 +38,20 @@ def context_for(rows, received, root, base, request):
     previews = Previews(SimpleNamespace(root=root, base=base, request=request))
     try:
         result = []
+        videos = 0
         for row in candidates:
-            if row.get('id') in selected and is_file(row):
+            if row.get('id') in selected and is_channels(row):
+                result.append({'kind':'document','direction':'incoming','text':channels_context(row)})
+            elif row.get('id') in selected and is_video(row):
+                videos += 1
+                try:
+                    if not video_enabled:raise ValueError('尚未开启视频画面分析，请由账号主人在控制台授权。')
+                    if videos>1:raise ValueError('每次只能分析一个视频，其他视频尚未分析，请分开发送。')
+                    result.append(fetch_video(previews.connection,row))
+                except Exception as error:
+                    reason=str(error) if isinstance(error,ValueError) else '视频下载或解码未完成。'
+                    result.append({'kind':'document','direction':'incoming','text':'未分析这个视频：'+reason+' 不要猜测其画面或声音。'})
+            elif row.get('id') in selected and is_file(row):
                 name, raw = fetch_file(previews.connection, row['id'], row['threadId'])
                 result.append({'kind': 'document', 'direction': 'incoming',
                                'text': '附件：' + name + '\n' + document_text(name, raw)})

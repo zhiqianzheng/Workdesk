@@ -114,6 +114,10 @@ class NativeConnection:
         records = []
         for row in reversed(page.get('items', [])):
             body = row.get('body') or {3: '[图片]', 34: '[语音]', 43: '[视频]', 47: '[表情]'}.get(row.get('type'), '[非文字消息]')
+            if row.get('type')==49 and row.get('appMessageType')==51:
+                link=row.get('link') or {}
+                body='[视频号卡片 · 未读取视频画面]\n'+str(link.get('sourceName') or '')+'\n'+str(link.get('description') or '')
+                body+='\n当前后台仅提供卡片信息，不提供该视频号的播放资源。'
             who = '我' if row.get('direction') == 'outgoing' else (row.get('senderName') or row.get('senderId') or '对方')
             stamp = row.get('createdAt', '').replace('T', ' ')
             records.append({'id': row['id'], 'text': f'{who} · {stamp}\n{body}',
@@ -334,7 +338,7 @@ class NativeAI:
         config_file = self.root / 'private-data/workdesk-native-ai.json'
         if config_file.exists():
             saved = json.loads(config_file.read_text(encoding='utf-8'))
-            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False)}
+            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False), 'videoAnalysis':saved.get('videoAnalysis',False)}
         self.lifecycle_lock = threading.Lock()
         self.start_requested = 0
         if (self.root / 'private-data/watchdog.enabled').exists():
@@ -357,7 +361,7 @@ class NativeAI:
         try:
             saved = json.loads((self.root / 'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
             self.config = {'allContacts': saved.get('allContacts', False),
-                           'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False)}
+                           'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False), 'videoAnalysis':saved.get('videoAnalysis',False)}
         except (OSError, ValueError):
             pass
         status_path = self.root / 'private-data/global-status.json'
@@ -378,14 +382,16 @@ class NativeAI:
                          '原生 AI 心跳超时，进程仍在；暂无法确认正常回复。')
         return {'backend': 'native', 'enabled': active, 'allContacts': self.config['allContacts'], 'contacts': self.config.get('contacts', []),
                 'ownerCommands': controls_active,
-                'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False),
+                'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False), 'videoAnalysis':self.config.get('videoAnalysis',False),
                 'status': ('原生后台 AI 已开启，按已配置的接管范围回复。' if active else inactive_note) +
                           (' 已启用按需联网检索。' if self.config.get('webSearch') else '') +
                           (' 已启用图片回复。' if self.config.get('mediaReplies') else '') +
+                          (' 已启用视频抽帧分析（不含音轨）。' if self.config.get('videoAnalysis') else '') +
                           (' 本人微信口令监听正常。' if controls_active else ' 本人微信口令监听尚未就绪。') +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
                 'metrics': {k: status.get(k, 0) for k in ('replies', 'active', 'queued', 'blocked')},
-                'health': {'state': 'ready' if active else 'off', 'scanAgeSeconds': round(age, 1)}}
+                'paused': stopping,
+                'health': {'state': ('retrying' if status.get('state')=='retrying' else 'ready') if active else 'off', 'scanAgeSeconds': round(age, 1)}}
 
     def pause(self):
         (self.root / 'private-data/global.stop').touch()

@@ -6,3 +6,5 @@ vendor/
 .runtime/
 build/
 *.spec
+
+/_vendor/
