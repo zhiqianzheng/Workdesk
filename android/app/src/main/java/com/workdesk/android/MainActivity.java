@@ -51,7 +51,7 @@ public final class MainActivity extends Activity {
     private String status(){return (RuntimeState.enabled(this)?"接管已开启":"接管已暂停")+" · "+(RuntimeState.connected?"通知服务在线":"通知服务未连接")+"\n"+RuntimeState.last;}
     private JSONObject read(){try{return com.workdesk.android.Settings.read(this);}catch(Exception e){toast("无法解密本机设置，请重新配置");return new JSONObject();}}
     private void home(){
-        LinearLayout c=card("按你的节奏，接住新消息","无需电脑常开。当前为安卓独立文字预览版，功能范围与桌面版不同。");live=text(status(),16,INK);c.addView(live);
+        LinearLayout c=card("按你的节奏，接住新消息","不依赖电脑端 Workdesk；若 API 自建在电脑上，电脑仍须在线。当前为安卓独立文字预览版。");live=text(status(),16,INK);c.addView(live);
         button(c,RuntimeState.enabled(this)?"暂停自动回复":"开启自动回复",true,()->{
             if(RuntimeState.enabled(this)){RuntimeState.setEnabled(this,false);render();return;}
             JSONObject cfg=read();if(cfg.optString("endpoint").isEmpty()||cfg.optString("model").isEmpty()||cfg.optString("scope").trim().isEmpty()||!cfg.optBoolean("consent")){toast("先保存 API、接管名单并勾选授权");page=1;render();return;}

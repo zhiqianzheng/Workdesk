@@ -1,6 +1,6 @@
 # Workdesk Android 0.1.0-preview.1
 
-独立运行的原生 Android 文字助手，Android 9（API 28）及以上。不需要电脑常开，也不是桌面工作台套 WebView。APK 不包含 API、密钥、微信登录态或测试用的仿真微信应用。
+独立运行的原生 Android 文字助手，Android 9（API 28）及以上。不依赖电脑端 Workdesk，也不是桌面工作台套 WebView。若模型 API 通过电脑上的 CLIProxyAPI/Tailscale Funnel 提供，电脑仍须在线；也可改用其他可直接访问的 HTTPS 模型服务。APK 不包含 API、密钥、微信登录态或测试用的仿真微信应用。
 
 模拟器界面预览（合成验收环境，不含真实聊天或密钥）：
 
