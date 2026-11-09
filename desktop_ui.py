@@ -65,6 +65,7 @@ def build_console(platform=None, preview=False):
     health_events = queue.Queue()
     health_busy = False
     cached_connection = {}
+    owner_edited = False
     busy = False
     widgets, contacts = [], []
     status = tk.StringVar(value='准备后台、扫码登录，然后打开工作台。AI 自动回复可按需开启。')
@@ -242,20 +243,36 @@ def build_console(platform=None, preview=False):
     web_search = tk.BooleanVar(value=saved.get('webSearch', False))
     media_replies = tk.BooleanVar(value=saved.get('mediaReplies', False))
     video_analysis=tk.BooleanVar(value=saved.get('videoAnalysis',False))
+    voice_replies=tk.BooleanVar(value=saved.get('voiceReplies',False))
+    owner_dialog=tk.BooleanVar(value=saved.get('ownerAssistant',False))
+    language_names={'zh':'普通话','en':'英语','auto':'自动检测'}
+    voice_language=tk.StringVar(value=language_names.get(saved.get('voiceLanguage','zh'),'普通话'))
     consent = tk.BooleanVar(value=False)
+    def mark_owner_edited():
+        nonlocal owner_edited
+        owner_edited=True
     for text, variable in [('按需联网查询天气、新闻等（需要服务支持）', web_search),
                            ('按请求生成图片和表情图片（使用图像额度）', media_replies),
                            ('分析收到的 MP4 视频画面（抽帧，不含声音）', video_analysis),
+                           ('本地语音转文字后回复（识别可能有误）', voice_replies),
+                           ('文件传输助手个人对话（独立于好友群自动回复）', owner_dialog),
                            ('允许向上述 API 提交接管会话，并自动发送生成的回复', consent)]:
         check = ttk.Checkbutton(capabilities, text=text, variable=variable)
+        if variable is owner_dialog:check.configure(command=mark_owner_edited)
         check.pack(anchor='w');widgets.append(check)
+    voice_row=ttk.Frame(capabilities,style='Card.TFrame');voice_row.pack(fill='x',pady=(8,0))
+    ttk.Label(voice_row,text='语音识别语言',style='Card.TLabel').pack(side='left',padx=(0,12))
+    language_box=ttk.Combobox(voice_row,textvariable=voice_language,values=list(language_names.values()),width=15,state='readonly')
+    language_box.pack(side='left');widgets.append(language_box)
     def save():
         if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中配置。');return
         data={name: entry.get() for name, entry in fields.items()}
         data.update(contacts=[contacts[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(),
-                    webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(), interval=1)
+                    webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(), voiceReplies=voice_replies.get(), voiceLanguage=next((k for k,v in language_names.items() if v==voice_language.get()),'zh'), ownerAssistant=owner_dialog.get(), ownerConsent=consent.get(), interval=1)
         def saved_ok(_):
-            fields['apiKey'].delete(0, 'end');status.set('配置已保存，AI 保持暂停。确认授权后点击开启。')
+            nonlocal owner_edited
+            owner_edited=False
+            fields['apiKey'].delete(0, 'end');status.set('配置已保存，好友/群 AI 保持暂停；个人助手按独立开关运行。' if owner_dialog.get() else '配置已保存，AI 保持暂停。确认授权后点击开启。')
         task(lambda: platform.save(data), saved_ok)
     def start():
         if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中开启。');return
@@ -276,7 +293,8 @@ def build_console(platform=None, preview=False):
     button(health_actions, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])), 'Danger.TButton')
     commands = card(pages[2], '在微信里，也能掌控助手', '仅响应你账号发出的口令；好友和群成员的开关及查询口令会被忽略。')
     for heading, example in [('暂停回复', '关闭AI回复 / 停止AI回复'), ('恢复回复', '打开AI回复 / 开启AI回复'),
-                             ('查询状态', '查询AI回复状态 / 查询AI自动回复状态')]:
+                             ('查询状态', '查询AI回复状态 / 查询AI自动回复状态'),
+                             ('个人助手', '开启个人助手 / 关闭个人助手')]:
         line = ttk.Frame(commands, style='Card.TFrame');line.pack(fill='x', pady=7)
         ttk.Label(line, text=heading, width=12, style='Card.TLabel', font=(family, 10, 'bold')).pack(side='left')
         ttk.Label(line, text=example, style='Muted.TLabel', wraplength=530).pack(side='left')
@@ -297,6 +315,10 @@ def build_console(platform=None, preview=False):
                      '监听异常，正在重试' if value.get('health',{}).get('state')!='ready' else
                      '部分会话需要核对' if metrics.get('blocked',0) else
                      '正在处理新消息' if metrics.get('active',0) else '正在接管，等待新消息') if enabled else 'AI 当前已暂停' if value.get('paused') else 'AI 监听未就绪或尚未开启')
+        if not owner_edited:owner_dialog.set(value.get('ownerAssistant',False))
+        owner_health=value.get('ownerHealth',{})
+        if not enabled and value.get('paused') and value.get('ownerAssistant') and owner_health.get('ready'):
+            summary.set('好友/群 AI 已暂停；个人助手可用')
         health_info=value.get('health', {})
         details.set(('本人口令：' + ('监听正常' if value.get('ownerCommands') else '未就绪')
                      + '    ·    累计回复：%s 条' % value.get('metrics', {}).get('replies', 0)
@@ -304,6 +326,8 @@ def build_console(platform=None, preview=False):
                      + '\n\n' + value.get('status', '')
                      + '\n\n处理中 %s · 排队 %s · 待核对 %s' % (metrics.get('active',0),metrics.get('queued',0),metrics.get('blocked',0))
                      + '\n\n监听心跳：%s 秒前' % health_info.get('scanAgeSeconds', '—')))
+        details.set(details.get()+'\n\n个人助手：'+('待核对发送结果' if owner_health.get('state')=='blocked' else '工作中' if owner_health.get('state')=='working' else '监听正常' if owner_health.get('ready') else '未就绪或已关闭')
+                    +' · 累计回复 %s 条'%owner_health.get('replies',0))
         if mode.get()=='native':connection_note.set(cached_connection.get('detail','正在检查后台状态…'))
         if not busy and status.get().startswith('准备后台、扫码登录'):
             status.set(cached_connection.get('detail','正在检查后台状态…'))
@@ -339,6 +363,7 @@ def build_console(platform=None, preview=False):
         try:
             ok, result, done=events.get_nowait();busy=False;activity.stop();activity.pack_forget()
             for widget in widgets:widget.configure(state='normal')
+            language_box.configure(state='readonly')
             mode_changed();status.set('操作完成。' if ok else result)
             if done:
                 try:done(result)
@@ -377,7 +402,7 @@ def build_console(platform=None, preview=False):
     app.bind('<MouseWheel>', wheel);app.bind('<Button-4>', wheel);app.bind('<Button-5>', wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
                        consent=consent, start=start, save=save, canvases=canvases, selection=selection,
-                       webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats, videoAnalysis=video_analysis)
+                       webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats, videoAnalysis=video_analysis, voiceReplies=voice_replies, ownerAssistant=owner_dialog)
     app.console.update(apply_health=show_health, connection_buttons=controls, badge=badge)
     if preview:
         show_health({'enabled':False, 'ownerCommands':True, 'metrics':{'replies':0},

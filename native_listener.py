@@ -104,7 +104,8 @@ def work(thread, messages, since=0):
                         datetime.fromisoformat(row['createdAt'].replace('Z', '+00:00')).timestamp() >= since]
             if not received:
                 return {'state': 'skipped_old_history'}
-        context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False))
+        context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False),voice_enabled=CONFIG.get('voiceReplies',False),voice_language=CONFIG.get('voiceLanguage','zh'))
+        if STOP.exists():return {'state':'cancelled'}
         config = dict(CONFIG)
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()

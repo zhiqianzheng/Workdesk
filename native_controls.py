@@ -14,20 +14,26 @@ VERBS = {'停止': 'pause', '关闭': 'pause', '暂停': 'pause', '关掉': 'pau
          '开启': 'start', '打开': 'start', '恢复': 'start', '启动': 'start', '开一下': 'start'}
 PREFIX = r'(?:(?:请|麻烦|帮我|给我|现在|先|暂时|立即|马上|把|将))*'
 SUFFIX = r'(?:(?:功能|模式|服务|一下|吧|了|先|暂时))*'
-SUBJECT = r'ai(?:自动)?回复'
+SUBJECT = r'ai(?:的)?(?:自动)?回复'
 VERB = '(?P<verb>' + '|'.join(VERBS) + ')'
 PATTERNS = [re.compile(PREFIX + VERB + SUBJECT + SUFFIX),
             re.compile(PREFIX + SUBJECT + r'(?:功能|模式|服务)?' + VERB + SUFFIX)]
 STATUS_PATTERN = re.compile(PREFIX + r'(?:查询|查看|检查)' + SUBJECT + r'(?:的)?状态' + SUFFIX)
+OWNER_PATTERN=re.compile(PREFIX+VERB+r'个人助手'+SUFFIX)
+OWNER_REVERSE_PATTERN=re.compile(PREFIX+r'个人助手'+VERB+SUFFIX)
 
 
 def control_text(text):
     if not isinstance(text, str) or len(text) > 80:
         return None
     text = unicodedata.normalize('NFKC', text).lower()
+    text=text.translate(str.maketrans('關閉開啟暫個復覆詢態幫請現時馬將','关闭开启暂个复复询态帮请现时马将'))
     text = re.sub(r'\s+', '', text).strip('。.!！,，;；')
     if STATUS_PATTERN.fullmatch(text):
         return 'status'
+    if text in ('确认个人助手发送结果','已核对个人助手发送结果'):return 'owner_ack'
+    personal=OWNER_PATTERN.fullmatch(text) or OWNER_REVERSE_PATTERN.fullmatch(text)
+    if personal:return 'owner_'+VERBS[personal['verb']]
     # Full intent grammar, never a substring search: quotations, negation,
     # questions, forwarded instructions and ordinary discussion are not commands.
     for pattern in PATTERNS:
@@ -95,7 +101,15 @@ class OwnerControls:
                     elif action == 'start':
                         state['pendingStart'] = {'cursor': str(event['cursor']), 'at': stamp,
                                                  'stopStamp': self.stop.stat().st_mtime_ns if self.stop.exists() else None}
-                    elif row['id'] not in state.get('queriesDone', []):
+                    elif action=='owner_ack':
+                        (self.private/'owner-assistant-reviewed').touch()
+                    elif action in ('owner_pause','owner_start'):
+                        current=json.loads((self.private/'workdesk-native-ai.json').read_text(encoding='utf-8'))
+                        import uuid
+                        current.update(ownerAssistant=action=='owner_start',ownerEpoch=uuid.uuid4().hex,ownerSince=stamp,
+                                       ownerStartCursor=str(event['cursor']))
+                        atomic(self.private/'workdesk-native-ai.json',current)
+                    elif action=='status' and row['id'] not in state.get('queriesDone', []):
                         state.setdefault('queries', {}).setdefault(row['id'], {'thread': row['threadId']})
                     state['lastCommand'] = action
                     state['lastCommandAt'] = stamp
@@ -131,7 +145,13 @@ class OwnerControls:
         else:
             headline = '已开启，正在监听新消息。'
         scope = '全部好友和普通群聊' if config.get('allContacts') else '指定的 %s 个会话' % len(config.get('contacts', []))
+        try:personal=json.loads((self.private/'owner-assistant-status.json').read_text())
+        except (OSError,ValueError):personal={}
+        personal_ready=(NativeAI.process_alive(personal.get('pid')) and time.time()-personal.get('updatedAt',0)<30)
+        personal_note=('待核对发送结果' if personal.get('state')=='blocked' else
+                       '尚未就绪' if not personal_ready else '正在处理' if personal.get('state')=='working' else '已开启') if config.get('ownerAssistant') else '已关闭'
         return ('AI 自动回复状态\n' + headline + '\n微信：' + ('在线' if online else '未就绪')
+                + '\n文件传输助手个人通道：'+personal_note
                 + '\n范围：' + scope
                 + '\n处理中 %s · 排队 %s · 待核对 %s' % (status.get('active', 0), status.get('queued', 0), blocked)
                 + '\n累计回复 %s 条' % status.get('replies', 0)

@@ -39,6 +39,8 @@ def web_payload(config, messages):
         '联网回答保留一到两个可点击的来源链接，不输出工具过程、Markdown 表格或内部引用标记。')
     if not config.get('webSearch', True):
         instructions[-1] = '当前时间：' + now + '。联网查询已被用户关闭，不能编造实时资料或声称已经搜索。'
+    if config.get('ownerConversation'):
+        instructions.append('这是本人的个人对话，按任务需要提供充分解释、步骤和代码，不必限制为简短闲聊；需要比较时可以使用列表或表格。')
     if config.get('mediaReplies'):
         instructions.append('你具备生成图片、获取在线表情素材并由程序发送图片的能力。对方明确要求画图、发图片、表情包时，'
             '必须实际调用 image_generation 或 get_sticker，不能仅给提示词、链接或声称没有该能力。'
@@ -66,7 +68,7 @@ def web_payload(config, messages):
     return {'model': config['model'], 'instructions': '\n'.join(instructions),
             'input': inputs, 'tools': tools,
             'tool_choice': 'auto', 'include': ['web_search_call.action.sources'],
-            'max_output_tokens': 1200, 'stream': False}
+            'max_output_tokens': 4000 if config.get('ownerConversation') else 1200, 'stream': False}
 
 
 def response_text(result, diagnostics=None, allow_media=False):

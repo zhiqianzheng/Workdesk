@@ -21,10 +21,28 @@ class Supervisor:
         self.attempts = 0
         self.healthy_since = None
         self.controls = OwnerControls(root)
+        self.owner_child = None
+        self.owner_attempts = 0
+        self.owner_next_start = 0
+
+    def ensure_owner(self):
+        path=self.private/'workdesk-native-ai.json'
+        if not path.exists() or json.loads(path.read_text()).get('ownerAssistant') is not True:return
+        status_path=self.private/'owner-assistant-status.json'
+        status=json.loads(status_path.read_text()) if status_path.exists() else {}
+        if NativeAI.process_alive(status.get('pid')) or (self.owner_child is not None and self.owner_child.poll() is None):
+            if status.get('state') in ('listening','working') and time.time()-status.get('updatedAt',0)<30:self.owner_attempts=0
+            return
+        if time.monotonic()<self.owner_next_start:return
+        self.owner_attempts+=1
+        self.owner_next_start=time.monotonic()+min(60,5*2**min(self.owner_attempts-1,4))
+        self.owner_child=subprocess.Popen(command('owner',self.root),cwd=self.root,**background())
 
     def tick(self):
         if not (self.private / 'watchdog.enabled').exists():
             return 'disabled'
+        try:self.ensure_owner()
+        except Exception:pass  # Private-channel repair must not disable owner controls.
         # Command monitoring must survive pause and must not require an LLM.
         try:
             self.controls.poll()

@@ -5,6 +5,7 @@ from native_images import Previews
 from native_files import is_file, fetch_file, document_text
 from native_controls import control_text
 from native_video import is_video, is_channels, fetch_video, channels_context
+from native_voice import is_voice, fetch_voice
 
 
 def replyable(row):
@@ -12,13 +13,13 @@ def replyable(row):
     if row.get('type') == 1 and control_text(row.get('body')):
         return False
     return row.get('direction') == 'incoming' and (
-        row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row)
+        row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row) or is_voice(row)
         or (row.get('type') == 1 and bool(row.get('body', '').strip())))
 
 
-def context_for(rows, received, root, base, request, video_enabled=False):
+def context_for(rows, received, root, base, request, video_enabled=False,voice_enabled=False,voice_language='zh'):
     latest = max(row.get('createdAt', '') for row in received)
-    targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row)}
+    targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row) or is_voice(row)}
     ordered = sorted(rows, key=lambda row: (row.get('createdAt', ''), str(row.get('serverId', ''))))
     ordered = [row for row in ordered if not (row.get('type') == 1 and control_text(row.get('body')))]
     recent = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
@@ -40,7 +41,14 @@ def context_for(rows, received, root, base, request, video_enabled=False):
         result = []
         videos = 0
         for row in candidates:
-            if row.get('id') in selected and is_channels(row):
+            if row.get('id') in selected and is_voice(row):
+                try:
+                    if not voice_enabled:raise ValueError('尚未开启本地语音转写，请账号主人在控制台授权。')
+                    text=fetch_voice(previews.connection,row,language=voice_language)
+                except Exception as error:
+                    text='未能理解这段语音：'+(str(error) if isinstance(error,ValueError) else '语音组件或下载未就绪。')+' 请对方用文字补充，不要猜测。'
+                result.append({'kind':'document','direction':'incoming','text':text})
+            elif row.get('id') in selected and is_channels(row):
                 result.append({'kind':'document','direction':'incoming','text':channels_context(row)})
             elif row.get('id') in selected and is_video(row):
                 videos += 1
