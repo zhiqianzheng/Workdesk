@@ -4,9 +4,21 @@ Workdesk 是一个运行在 Windows 本机的微信界面辅助工具：将电�
 
 提供两种接入方式：默认通过 Windows UI Automation 读取已登录的电脑版微信，文字控件不可用时尝试本地 OCR；可选 Agent WeChat 原生后台连接，通过本机 HTTP 接口收发消息，不操作桌面鼠标、键盘或剪贴板。本项目不是微信官方网页版。
 
-**直接使用：** [下载 Windows 组合便携包](https://github.com/zhiqianzheng/Workdesk/releases/latest)（含 WindowOpacity 和中文使用说明）。完整解压后双击 `Workdesk-Plus.exe`，会自动启动本地服务并打开网页。
+**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.1)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
 
-> `main` 已包含 AI 自动回复、Agent WeChat 后台适配和后台图片收发；现有 Release 便携包尚未随本次源码更新重新打包，功能请以对应 Release 的说明为准。
+> v1.1.0-preview.1 为 Windows x64 桌面预览包，内置 Python 运行环境、Agent WeChat v2.2.0、AI 监听与守护。已通过隔离启动和配置验证，尚未在第二台电脑完成真实扫码收发验收；不含 WindowOpacity。
+
+## 桌面控制台（本地预览版）
+
+新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.1 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
+
+- 后台模式：自动准备本机服务 → 扫码登录 → 打开工作台；AI 在控制台中配置，选择联系人或群聊，保存后默认暂停，确认授权再点击开启。
+- 官方窗口模式：选择对应选项，自行登录电脑版微信，然后打开工作台；AI 配置使用网页内的设置。
+- 控制台提供刷新接管对象、保存配置、开启/恢复、暂停和状态检查。密钥不回显、用当前 Windows 用户加密保存，原生数据位于 `%LOCALAPPDATA%/Workdesk/agent`。
+- 关闭网页或控制台不会停止已开启的后台 AI；请使用暂停按钮。原生模式不抢桌面输入，未设置开机自启。
+- 多账号、跨电脑同步和云端托管不在这个版本中。后台依赖端口 6175、网页依赖 18765；若另一套程序已占用，请先处理原实例，不会擅自终止它。
+
+源码可运行 `.venv/Scripts/pythonw.exe desktop.pyw`；需要自行准备 `vendor/agent-wechat/wx.exe`（v2.2.0，对应校验值在 `desktop_app.py`），便携包已包含此组件及许可说明。独立配置向导和原有启动方式继续保留。
 
 ## 效果预览
 
@@ -90,9 +102,75 @@ py -3.12 -m venv .venv
 - 发送任务尚未完成时页面会查询同一个请求的结果，不重复提交；结果未知时请先核对会话。成功不代表对方已读。
 - 文字与图片路径不使用桌面输入自动化，因此可以同时在其他软件办公。语音、视频等仍需在手机或对应客户端操作。
 
-### 原生后台 AI 的当前边界
+### 原生后台 AI：配置与启动
 
-工作台目前提供独立 AI 监听器的状态、暂停与恢复入口，沿用其现有 API 与风格配置，暂不提供原生模式的网页配置编辑。该入口依赖上述目录中的 `global_listener.py` 和 `private-data/global-status.json` 等运行状态；**该独立监听器尚未随本仓库交付**。仅安装 Agent WeChat 与本仓库可使用工作台的原生聊天适配，但不会自动获得完整的原生 AI 监听部署。
+仓库已包含可配置的 `native_listener.py` 及其内置本机配置向导，无需作者的脚本、账号或密钥。Agent WeChat 本身仍需单独安装，不随本仓库分发。以下命令对应已核对的 v2.2.0 Windows CLI；不同版本请参考上游说明和 `wx --help`。
+
+1. 按“从源码运行”安装 Python 依赖。从 [Agent WeChat Releases](https://github.com/thisnick/agent-wechat/releases) 获取 Windows x64 CLI，将 `wx.exe` 放在自己的目录，例如 `D:\AgentWeChat`。不要使用他人的 `private-data`。
+2. 创建 `D:\AgentWeChat\server.toml`，路径按自己的目录修改：
+
+```toml
+schemaVersion = 1
+listen = "127.0.0.1:6175"
+dataDir = "D:/AgentWeChat/private-data"
+```
+
+3. 在 PowerShell 启动后台服务并扫码登录；已有账号时跳过 create：
+
+```powershell
+cd D:\AgentWeChat
+.\wx.exe --server-config .\server.toml daemon start
+.\wx.exe --server-config .\server.toml accounts create --alias personal
+.\wx.exe --server-config .\server.toml --account personal auth login --strategy qr
+.\wx.exe --server-config .\server.toml accounts list
+```
+
+手机确认后记录列表中的实际 **account ID**，配置时不能用昵称或 alias 代替。手机可能显示 Linux 设备，请核对是自己刚启动的登录。独立登录可能挤掉官方电脑微信，且不会获得完整旧历史。
+
+4. 若只接管指定对象，查询并记录准确的 **thread ID**，不用名称匹配，避免同名误发：
+
+```powershell
+.\wx.exe --server-config .\server.toml --account personal chats list
+.\wx.exe --server-config .\server.toml --account personal contacts find "联系人昵称"
+```
+
+5. 回到 Workdesk 源码目录，运行配置向导：
+
+```powershell
+.\.venv\Scripts\python.exe native_listener.py --configure --root D:\AgentWeChat
+```
+
+输入 account ID、兼容 Chat Completions 的 API 地址（例如 `https://你的服务/v1`）、模型 ID、密钥和回复风格。密钥不回显，并用当前 Windows 用户的 DPAPI 加密保存。默认使用指定 thread ID 名单，明确输入 `YES` 才接管所有好友与普通群聊。配置完成后 **AI 保持暂停**。
+
+向导生成本机 `.runtime/native-backend.json` 和数据目录内的 `private-data/workdesk-native-ai.json`，不必手写配置。修改配置前必须先暂停并等待监听进程退出，重新配置后需要再次明确恢复。
+
+6. 启动工作台，确认会话可读取，再打开 AI 设置，点击“恢复后台 AI”：
+
+```powershell
+.\.venv\Scripts\pythonw.exe launch.pyw
+```
+
+恢复后才开始向你配置的 API 提交文字上下文并自动发送回复。网页提供状态、暂停与恢复；原生 API 参数、接管范围通过向导修改。
+
+### 两种方式如何选与切换
+
+| 项目 | 官方 Windows 微信 UIA/OCR | Agent WeChat 原生后台 |
+| --- | --- | --- |
+| 登录 | 官方电脑版微信 | 独立扫码登录 Agent WeChat |
+| 消息来源 | 窗口已加载内容 | 本机原生服务已同步内容 |
+| AI 配置 | 网页 AI 设置 | `native_listener.py --configure` 本机向导 |
+| 办公时自动回复 | 需微信前台且键鼠空闲，OCR 能力更有限 | API 后台运行，无桌面输入操作 |
+| 启停 | 每次服务启动默认关闭，网页启用 | 初次配置暂停，网页恢复；手动暂停持久保存 |
+
+切回 UIA/OCR：先暂停原生 AI 并等待停止，再停止工作台，把 `.runtime/native-backend.json` 改名备份，登录官方电脑版微信后重新启动工作台。切回原生模式：先停止 UIA 工作台，在 Agent WeChat 完成登录，恢复配置文件或重新运行向导，再启动工作台。两种电脑端登录可能互相挤下线，不保证同时在线。
+
+### 原生自动回复范围与排障
+
+仅回复允许范围内的新文字消息；公众号、系统通知、文件传输助手和非文字消息不参与 AI 回复。首次启用从当前事件游标开始，不补回完整旧历史；暂停后恢复可能继续处理暂停期间的新消息。每个会话串行处理，最多两个会话并行生成，延迟取决于 API，不保证即时或每条必达。最近最多 12 条文字、每条最多 1500 字会提交给模型服务。
+
+没有回复时检查账号登录、AI 状态、精确 thread ID 名单、API 地址和模型权限。监听状态在 `private-data/global-status.json`，守护状态在 `watchdog-status.json`。错误状态只记录类型，不写入密钥或模型响应原文。发送结果未知或发送中断的会话会进入 blocked 状态，防止重复发送；请先核对实际消息，不要盲删状态文件强制补发。
+
+`native-ai-state.json` 保存账号绑定、游标和待处理消息标识。不要复制给别人或跨账号复用；切换账号应使用独立数据目录。仓库不附带真实账号、密钥、令牌、二维码、聊天记录或运行状态。
 
 关闭工作台网页或停止其服务，不会自动停止独立 AI 监听器。请使用 AI 暂停按钮；状态心跳超时会显示不可用，不应理解为仍在持续回复。当前本机图片验证覆盖真实接收预览、网页附件入口及模拟发送流程，尚未完成真实图片发送的端到端验证。
 
@@ -106,15 +184,15 @@ py -3.12 -m venv .venv
 - 状态判断同时核对进程存活与心跳，避免进程已退出但页面仍显示“监听中”。仍存活但心跳超时的进程不会被强制结束；状态文件损坏或缺失时也不会盲目重启。
 - 守护、监控与重启只使用本机进程及文件接口，不激活微信窗口，不操作鼠标、键盘或剪贴板。未设置系统开机自启。
 
-此功能仍依赖独立部署的 `global_listener.py`。监听器必须支持 `global.stop`、启动即检查暂停标记、进程单实例锁，并持续写入包含 `pid`、`state`、`updatedAt` 的 `private-data/global-status.json`。状态写入应容忍 Windows 短暂文件占用；中断后不能直接重发结果未知的消息。守护不会替代这些监听器职责，也不会自动安装监听器或创建账号配置。
+新配置使用仓库内的 `native_listener.py`，包含单实例锁、暂停检查、状态写入重试和未知发送保护。为兼容已有部署，没有 `workdesk-native-ai.json` 时仍使用数据目录内的旧 `global_listener.py`；新用户无需这个旧文件。守护不会代替账号登录或 API 配置。
 
 `private-data/watchdog.enabled` 保存守护启用状态，`watchdog-status.json` 记录守护心跳，`watchdog.lock` 防止重复守护。这些均为本机运行文件，不应提交或分享。关闭工作台不等于停止独立 AI 服务；停止自动回复请使用暂停按钮。
 
-本轮验证使用隔离测试进程确认了异常退出后重启、手动暂停期间不重启和明确恢复后重新启动，未通过终止真实微信监听器来测试。已有 125 项回归测试通过；Release 尚未重新打包。
+隔离测试确认了异常退出后重启、手动暂停期间不重启和明确恢复后重新启动；未终止真实微信监听器进行测试。125 项回归测试通过，桌面预览包另已验证打包后的网页、监听与守护入口。
 
 ## 便携包使用方式
 
-如果你拿到已打包的 Windows 便携压缩包：
+桌面预览包请按上方“桌面控制台”使用。以下步骤仅适用于历史 Windows 便携组合包：
 
 1. **完整解压**，保留程序和 `_internal` 等文件夹的相对位置。
 2. 登录电脑微信，进入普通聊天，保持窗口未最小化。
@@ -220,6 +298,7 @@ py -3.12 -m venv .venv
 | `media.py`、`clipboard_image.py` | 图片预览、剪贴板和图片发送 |
 | `native_backend.py`、`native_images.py` | Agent WeChat 本机 API 适配、异步图片预览与上传发送 |
 | `native_watchdog.py` | 原生 AI 监听守护、异常退出恢复与持久暂停保护 |
+| `native_listener.py` | 可配置的原生 AI 监听器、本机加密配置向导 |
 | `native_input.py` | 绑定窗口的原生输入操作 |
 | `web/` | 网页界面、样式与交互 |
 | `launch.pyw`、`portable.pyw` | 源码与便携版启动入口 |
