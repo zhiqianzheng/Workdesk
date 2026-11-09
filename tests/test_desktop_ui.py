@@ -41,3 +41,20 @@ class DesktopConsoleTests(unittest.TestCase):
         self.app.console['start']()
         self.platform.ai.assert_not_called()
         self.assertIn('授权', self.app.console['status'].get())
+
+    def test_connected_backend_and_paused_ai_are_displayed_separately(self):
+        self.app.console['apply_health']({'enabled':False,'paused':True,'ownerCommands':True,
+            'connection':{'serviceReady':True,'authenticated':True,'online':True,'detail':'在线'}})
+        first,second,_=self.app.console['connection_buttons']
+        self.assertEqual(first.cget('text'),'后台已就绪');self.assertIn('disabled',first.state())
+        self.assertEqual(second.cget('text'),'微信已登录');self.assertIn('disabled',second.state())
+        self.assertIn('微信已连接',self.app.console['badge'].cget('text'))
+        self.assertIn('已暂停',self.app.console['summary'].get())
+
+    def test_backend_loss_does_not_leave_a_ready_badge_or_login_button(self):
+        self.app.console['apply_health']({'enabled':True,'health':{'state':'ready'},
+            'connection':{'serviceReady':False,'authenticated':False,'online':False,'detail':'无法连接'}})
+        first,second,_=self.app.console['connection_buttons']
+        self.assertNotIn('disabled',first.state());self.assertIn('disabled',second.state())
+        self.assertIn('后台未连接',self.app.console['badge'].cget('text'))
+        self.assertIn('暂不能自动回复',self.app.console['summary'].get())

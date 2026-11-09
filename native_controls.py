@@ -137,6 +137,7 @@ class OwnerControls:
                 + '\n累计回复 %s 条' % status.get('replies', 0)
                 + '\n联网：' + ('开' if config.get('webSearch') else '关')
                 + ' · 图片：' + ('开' if config.get('mediaReplies') else '关')
+                + ' · 视频抽帧：' + ('开' if config.get('videoAnalysis') else '关')
                 + '\n以上为当前运行状态，未额外调用模型测试接口。')
 
     def flush_queries(self, state):
