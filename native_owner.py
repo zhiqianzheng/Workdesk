@@ -130,7 +130,7 @@ def main(root):
         connection=NativeConnection({'directory':str(root),'account':config['account']})
         atomic(status_path,{'pid':os.getpid(),'state':'starting','updatedAt':time.time()})
         try:
-            state=json.loads(path.read_text()) if path.exists() else {}
+            state=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
             if state.get('account')!=config['account'] or 'cursor' not in state:
                 state={'account':config['account'],'cursor':str(config.get('ownerStartCursor') or connection.request('threads?limit=1')['asOfEventCursor']),
                        'queue':[],'history':[],'task':None,'replies':0,'activatedAt':int(config.get('ownerSince') or time.time()),

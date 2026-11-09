@@ -27,9 +27,9 @@ class Supervisor:
 
     def ensure_owner(self):
         path=self.private/'workdesk-native-ai.json'
-        if not path.exists() or json.loads(path.read_text()).get('ownerAssistant') is not True:return
+        if not path.exists() or json.loads(path.read_text(encoding='utf-8')).get('ownerAssistant') is not True:return
         status_path=self.private/'owner-assistant-status.json'
-        status=json.loads(status_path.read_text()) if status_path.exists() else {}
+        status=json.loads(status_path.read_text(encoding='utf-8')) if status_path.exists() else {}
         if NativeAI.process_alive(status.get('pid')) or (self.owner_child is not None and self.owner_child.poll() is None):
             if status.get('state') in ('listening','working') and time.time()-status.get('updatedAt',0)<30:self.owner_attempts=0
             return
@@ -50,7 +50,7 @@ class Supervisor:
         except Exception as error:
             self.control_error = type(error).__name__
         path = self.private / 'global-status.json'
-        status = json.loads(path.read_text()) if path.exists() else {}
+        status = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
         alive = NativeAI.process_alive(status.get('pid'))
         self.controls.resume_if_ready(alive or (self.child is not None and self.child.poll() is None))
         if (self.private / 'global.stop').exists():

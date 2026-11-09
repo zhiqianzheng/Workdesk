@@ -128,5 +128,5 @@ class PersonalVoiceTests(unittest.TestCase):
                 self.assertFalse(worker.is_alive())
             self.assertEqual(len(sent),1)
             self.assertTrue(sent[0][0]['text'].startswith(PREFIX))
-            state=json.loads((private/'owner-assistant-state.json').read_text())
+            state=json.loads((private/'owner-assistant-state.json').read_text(encoding='utf-8'))
             self.assertEqual(state['replies'],1)

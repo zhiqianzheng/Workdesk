@@ -45,7 +45,7 @@ class NativeConnection:
         self.previews = Previews(self)
 
     def request(self, path, data=None, request_id=None):
-        headers = {'Authorization': 'Bearer ' + (self.root / 'private-data/api-token').read_text().strip()}
+        headers = {'Authorization': 'Bearer ' + (self.root / 'private-data/api-token').read_text(encoding='utf-8').strip()}
         if data is not None:
             headers['Content-Type'] = 'application/json'
         if request_id:
@@ -301,7 +301,7 @@ class NativeAI:
                 if sys.platform.startswith('linux'):
                     try:
                         # kill(pid, 0) also succeeds for an exited, unreaped child.
-                        status = Path('/proc/%s/stat' % pid).read_text().rsplit(')', 1)[1].split()[0]
+                        status = Path('/proc/%s/stat' % pid).read_text(encoding='utf-8').rsplit(')', 1)[1].split()[0]
                         if status in ('Z', 'X'):
                             return False
                     except FileNotFoundError:
@@ -347,7 +347,7 @@ class NativeAI:
     def ensure_watchdog(self):
         path = self.root / 'private-data/watchdog-status.json'
         try:
-            status = json.loads(path.read_text())
+            status = json.loads(path.read_text(encoding='utf-8'))
             if self.process_alive(status.get('pid')):
                 return
         except (OSError, ValueError):
@@ -365,15 +365,15 @@ class NativeAI:
         except (OSError, ValueError):
             pass
         status_path = self.root / 'private-data/global-status.json'
-        status = json.loads(status_path.read_text()) if status_path.exists() else {}
+        status = json.loads(status_path.read_text(encoding='utf-8')) if status_path.exists() else {}
         stopping = (self.root / 'private-data/global.stop').exists()
         try:
-            personal=json.loads((self.root/'private-data/owner-assistant-status.json').read_text())
+            personal=json.loads((self.root/'private-data/owner-assistant-status.json').read_text(encoding='utf-8'))
         except (OSError,ValueError):personal={}
         personal_ready=(self.process_alive(personal.get('pid')) and personal.get('state') in ('listening','working')
                         and time.time()-personal.get('updatedAt',0)<30)
         try:
-            supervisor = json.loads((self.root / 'private-data/watchdog-status.json').read_text())
+            supervisor = json.loads((self.root / 'private-data/watchdog-status.json').read_text(encoding='utf-8'))
             controls_active = (self.process_alive(supervisor.get('pid'))
                                and time.time() - supervisor.get('updatedAt', 0) < 15
                                and not supervisor.get('controlError'))
@@ -418,7 +418,7 @@ class NativeAI:
     def _start(self):
         from ai_reply import ReplyError
         path = self.root / 'private-data/global-status.json'
-        status = json.loads(path.read_text()) if path.exists() else {}
+        status = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
         if self.process_alive(status.get('pid')):
             if self.public()['enabled']:
                 return self.public()

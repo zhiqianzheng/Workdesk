@@ -59,7 +59,7 @@ class OwnerControls:
     def request(self, path, data=None, key=None):
         config = json.loads((self.private / 'workdesk-native-ai.json').read_text(encoding='utf-8'))
         base = 'http://127.0.0.1:6175/v1/accounts/' + urllib.parse.quote(config['account'], safe='') + '/'
-        headers = {'Authorization': 'Bearer ' + (self.private / 'api-token').read_text().strip()}
+        headers = {'Authorization': 'Bearer ' + (self.private / 'api-token').read_text(encoding='utf-8').strip()}
         if data is not None:
             headers['Content-Type'] = 'application/json'
         if key:
@@ -73,7 +73,7 @@ class OwnerControls:
         if not (self.private / 'workdesk-native-ai.json').exists():
             return
         config = json.loads((self.private / 'workdesk-native-ai.json').read_text(encoding='utf-8'))
-        state = json.loads(self.path.read_text()) if self.path.exists() else {}
+        state = json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
         if state.get('account') != config['account'] or 'cursor' not in state:
             # Establish a fresh boundary; never execute historical chat commands.
             state = {'account': config['account'], 'cursor': str(self.request('threads?limit=1')['asOfEventCursor']),
@@ -120,7 +120,7 @@ class OwnerControls:
     def status_text(self):
         from native_backend import NativeAI
         try:
-            status = json.loads((self.private / 'global-status.json').read_text())
+            status = json.loads((self.private / 'global-status.json').read_text(encoding='utf-8'))
         except (OSError, ValueError):
             status = {}
         config = json.loads((self.private / 'workdesk-native-ai.json').read_text(encoding='utf-8'))
@@ -131,7 +131,7 @@ class OwnerControls:
                      and status.get('state') == 'listening')
         blocked = status.get('blocked', 0)
         if self.stop.exists():
-            controls = json.loads(self.path.read_text()) if self.path.exists() else {}
+            controls = json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
             headline = ('正在恢复，等待上一轮任务安全退出。' if controls.get('pendingStart') else
                         '已暂停，不会自动回复；本人口令仍在监听。')
         elif not online:
@@ -145,9 +145,10 @@ class OwnerControls:
         else:
             headline = '已开启，正在监听新消息。'
         scope = '全部好友和普通群聊' if config.get('allContacts') else '指定的 %s 个会话' % len(config.get('contacts', []))
-        try:personal=json.loads((self.private/'owner-assistant-status.json').read_text())
+        try:personal=json.loads((self.private/'owner-assistant-status.json').read_text(encoding='utf-8'))
         except (OSError,ValueError):personal={}
-        personal_ready=(NativeAI.process_alive(personal.get('pid')) and time.time()-personal.get('updatedAt',0)<30)
+        personal_ready=(NativeAI.process_alive(personal.get('pid')) and time.time()-personal.get('updatedAt',0)<30
+                        and personal.get('state') in ('listening','working'))
         personal_note=('待核对发送结果' if personal.get('state')=='blocked' else
                        '尚未就绪' if not personal_ready else '正在处理' if personal.get('state')=='working' else '已开启') if config.get('ownerAssistant') else '已关闭'
         return ('AI 自动回复状态\n' + headline + '\n微信：' + ('在线' if online else '未就绪')
@@ -180,7 +181,7 @@ class OwnerControls:
     def resume_if_ready(self, listener_alive):
         if not self.path.exists():
             return False
-        state = json.loads(self.path.read_text())
+        state = json.loads(self.path.read_text(encoding='utf-8'))
         pending = state.get('pendingStart')
         if not pending:
             return False
@@ -199,7 +200,7 @@ class OwnerControls:
         # sends in blocked. New events after this start command remain eligible.
         path = self.private / 'native-ai-state.json'
         if path.exists():
-            listener = json.loads(path.read_text())
+            listener = json.loads(path.read_text(encoding='utf-8'))
             if listener.get('account') != state['account']:
                 raise ValueError('Control account mismatch')
             for thread in listener.get('inFlight', {}):
