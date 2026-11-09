@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 import base64
+import os
 import ctypes
 from ctypes import wintypes
 import hashlib
@@ -21,6 +22,9 @@ class ReplyError(Exception):
 
 def protect(value, decrypt=False):
     """Windows DPAPI, bound to the current OS user; never persist a plaintext key."""
+    if os.name != 'nt':
+        from host_runtime import keyring_secret
+        return keyring_secret(value, decrypt)
     class Blob(ctypes.Structure):
         _fields_ = [('size', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_ubyte))]
     raw = base64.b64decode(value, validate=True) if decrypt else value.encode('utf-8')

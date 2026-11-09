@@ -1,3 +1,4 @@
+from host_runtime import data_home, python_gui, background, lock_file
 """Loopback Agent WeChat adapter; never activates or types into desktop windows."""
 import hashlib
 import json
@@ -179,6 +180,16 @@ class NativeAI:
     @staticmethod
     def process_alive(pid):
         # A stale heartbeat is not proof of process exit; never start a duplicate.
+        if os.name != 'nt':
+            if not isinstance(pid, int) or pid <= 0:
+                return False
+            try:
+                os.kill(pid, 0)
+                return True
+            except ProcessLookupError:
+                return False
+            except PermissionError:
+                return True
         import ctypes
         from ctypes import wintypes
         if not isinstance(pid, int) or pid <= 0:
@@ -218,9 +229,9 @@ class NativeAI:
                 return
         except (OSError, ValueError):
             pass
-        python = Path(sys.executable).with_name('pythonw.exe')
+        python = python_gui()
         subprocess.Popen(command('watchdog', self.root),
-                         cwd=self.root, creationflags=subprocess.CREATE_NO_WINDOW)
+                         cwd=self.root, **background())
 
     def public(self):
         status_path = self.root / 'private-data/global-status.json'
@@ -262,11 +273,11 @@ class NativeAI:
                 return self.public()
             raise ReplyError('监听进程尚未确认停止，请稍候再试。')
         (self.root / 'private-data/global.stop').unlink(missing_ok=True)
-        python = Path(sys.executable).with_name('pythonw.exe')
+        python = python_gui()
         subprocess.Popen((command('listener', self.root)
                           if (self.root / 'private-data/workdesk-native-ai.json').exists() else
                           [str(python), str(self.root / 'global_listener.py')]), cwd=self.root,
-                         creationflags=subprocess.CREATE_NO_WINDOW)
+                         **background())
         self.start_requested = time.monotonic() + 15
         return {**self.public(), 'status': '已请求启动原生 AI，稍后会更新状态。'}
 

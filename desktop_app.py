@@ -1,3 +1,4 @@
+from host_runtime import data_home, python_gui, background, lock_file
 """Desktop onboarding and local service control for the portable Workdesk app."""
 import hashlib
 import json
@@ -15,21 +16,22 @@ from ai_reply import AutoReply, protect
 from native_backend import NativeAI, NativeConnection
 from server import runtime_dir
 
-WX_HASH = '01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c'
+WX_HASH = ('01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c' if os.name == 'nt' else
+           '0b59f03ace18358d0606df1eb15e0495016aabe07208da8c45dc785b70de93b3')
 
 
 class Platform:
     def __init__(self, root=None, runtime=None, vendor=None):
-        self.root = Path(root or Path(os.environ['LOCALAPPDATA']) / 'Workdesk' / 'agent')
+        self.root = Path(root or data_home() / 'agent')
         self.runtime = Path(runtime or runtime_dir())
-        self.wx = Path(vendor or Path(__file__).parent / 'vendor' / 'agent-wechat' / 'wx.exe')
+        self.wx = Path(vendor or Path(__file__).parent / 'vendor' / 'agent-wechat' / ('wx.exe' if os.name == 'nt' else 'wx'))
         self.account = None
         self.connection = None
 
     def cli(self, *args, timeout=40):
         result = subprocess.run([str(self.wx), '--server-config', str(self.root / 'server.toml'),
                                  '--json', *args], capture_output=True, timeout=timeout,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
+                                **background())
         if result.returncode:
             raise ValueError('微信后台操作未完成。请确认网络正常、端口 6175 未被另一套服务占用，或重新扫码。')
         return json.loads(result.stdout) if result.stdout.strip() else {}
@@ -84,7 +86,6 @@ class Platform:
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
     def save(self, data):
-        import msvcrt
         private = self.root / 'private-data'
         self.contacts()  # Validate this account is actually connected.
         with (private / 'global-listener.lock').open('a+b') as lock:
@@ -93,7 +94,7 @@ class Platform:
                 lock.write(b'0'); lock.flush()
             lock.seek(0)
             try:
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                lock_file(lock)
             except OSError:
                 raise ValueError('AI 正在运行，请先暂停，等待退出后再保存配置。') from None
             old_path = private / 'workdesk-native-ai.json'
@@ -131,6 +132,8 @@ class Platform:
             return json.load(response)
 
     def open(self, mode):
+        if os.name != 'nt' and mode != 'native':
+            raise ValueError('Linux 版仅支持原生后台模式。')
         path = self.runtime / 'native-backend.json'
         new = {'directory': str(self.root), 'account': self.account} if mode == 'native' else None
         if mode == 'native' and not self.account:
@@ -157,8 +160,8 @@ class Platform:
             url = None
         if not url:
             cmd = [sys.executable, '--serve', '--no-browser'] if getattr(sys, 'frozen', False) else [
-                str(Path(sys.executable).with_name('pythonw.exe')), str(Path(__file__).with_name('server.py')), '--no-browser']
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
+                str(python_gui()), str(Path(__file__).with_name('server.py')), '--no-browser']
+            subprocess.Popen(cmd, **background())
             for _ in range(60):
                 time.sleep(.2)
                 url = self.session()
@@ -192,9 +195,11 @@ def main():
         saved_mode = json.loads((platform.runtime / 'desktop-mode.json').read_text()).get('mode', 'native')
     except (OSError, ValueError):
         saved_mode = 'native'
-    mode = tk.StringVar(value=saved_mode if saved_mode in ('native', 'uia') else 'native')
+    mode = tk.StringVar(value=saved_mode if os.name == 'nt' and saved_mode in ('native', 'uia') else 'native')
     choice = ttk.Frame(frame); choice.pack(fill='x')
     for value, label in [('native', '后台模式（推荐，不占用键鼠）'), ('uia', '官方微信窗口模式（需自行登录）')]:
+        if os.name != 'nt' and value == 'uia':
+            continue
         button = ttk.Radiobutton(choice, text=label, variable=mode, value=value);button.pack(side='left', padx=6);widgets.append(button)
     status = tk.StringVar(value='首次使用：准备后台 → 扫码登录 → 打开工作台。需要自动回复时，再配置下方 AI。')
     ttk.Label(frame, textvariable=status, wraplength=780).pack(fill='x', pady=12)
@@ -234,7 +239,7 @@ def main():
         ttk.Label(row, text=label, width=12).pack(side='left')
         entry = ttk.Entry(row, show='●' if name == 'apiKey' else '');entry.insert(0, default);entry.pack(side='left', fill='x', expand=True)
         fields[name] = entry;widgets.append(entry)
-    ttk.Label(form, text='地址示例：https://你的服务/v1；密钥不回显、加密保存，再次保存留空可保留。').pack(anchor='w')
+    ttk.Label(form, text='地址示例：https://你的服务/v1；密钥不回显、由系统保护，再次保存留空可保留。').pack(anchor='w')
     all_chats = tk.BooleanVar(value=False)
     check = ttk.Checkbutton(form, text='接管全部好友和普通群聊（否则只回复下方选中的对象）', variable=all_chats);check.pack(anchor='w');widgets.append(check)
     selection = tk.Listbox(form, selectmode='multiple', height=5, exportselection=False);selection.pack(fill='both', expand=True);widgets.append(selection)

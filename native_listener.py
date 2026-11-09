@@ -1,3 +1,4 @@
+from host_runtime import data_home, python_gui, background, lock_file
 """Native event-driven replies; no foreground, clipboard, or input automation."""
 from concurrent.futures import ThreadPoolExecutor
 import getpass
@@ -100,7 +101,7 @@ def work(thread, messages, since=0):
             return {'state': 'skipped'}
         if since:
             received = [row for row in received if row.get('createdAt') and
-                        datetime.fromisoformat(row['createdAt']).timestamp() >= since]
+                        datetime.fromisoformat(row['createdAt'].replace('Z', '+00:00')).timestamp() >= since]
             if not received:
                 return {'state': 'skipped_old_history'}
         latest = max(row.get('createdAt', '') for row in received)
@@ -211,7 +212,6 @@ def main():
 
 
 def configure(root):
-    import msvcrt
     private = root / 'private-data'
     if not (private / 'api-token').is_file():
         raise ValueError('请先安装并登录 Agent WeChat，确认目录内存在 private-data/api-token。')
@@ -222,7 +222,7 @@ def configure(root):
             lock.flush()
         lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            lock_file(lock)
         except OSError:
             raise ValueError('请先暂停现有 AI，等待监听进程退出后重新配置。') from None
         status_path = private / 'global-status.json'
@@ -268,8 +268,9 @@ def configure(root):
 
 
 def cli():
+    if os.name != 'nt':
+        os.umask(0o077)
     import argparse
-    import msvcrt
     parser = argparse.ArgumentParser(description='Native Workdesk background AI listener')
     parser.add_argument('--root', required=True, help='Agent WeChat directory containing private-data')
     parser.add_argument('--configure', action='store_true', help='Interactive setup; saves encrypted credentials and leaves AI paused')
@@ -290,7 +291,7 @@ def cli():
             lock.flush()
         lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            lock_file(lock)
         except OSError:
             sys.exit(0)
         main()

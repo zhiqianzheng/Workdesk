@@ -1,5 +1,8 @@
 """Portable GUI entry point and hidden service roles."""
 import sys
+import os
+if os.name != 'nt':
+    os.umask(0o077)
 
 if '--serve' in sys.argv:
     sys.argv.remove('--serve')

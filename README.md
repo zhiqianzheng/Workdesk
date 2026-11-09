@@ -1,6 +1,6 @@
 # Workdesk · 项目资料工作台
 
-Workdesk 是一个运行在 Windows 本机的微信界面辅助工具：将电脑微信中已加载的会话与消息，重新呈现为项目工作台、文档、代码编辑器或终端风格的网页。
+Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具：将电脑微信中已加载的会话与消息，重新呈现为项目工作台、文档、代码编辑器或终端风格的网页。
 
 提供两种接入方式：默认通过 Windows UI Automation 读取已登录的电脑版微信，文字控件不可用时尝试本地 OCR；可选 Agent WeChat 原生后台连接，通过本机 HTTP 接口收发消息，不操作桌面鼠标、键盘或剪贴板。本项目不是微信官方网页版。
 
@@ -19,6 +19,33 @@ Workdesk 是一个运行在 Windows 本机的微信界面辅助工具：将电�
 - 多账号、跨电脑同步和云端托管不在这个版本中。后台依赖端口 6175、网页依赖 18765；若另一套程序已占用，请先处理原实例，不会擅自终止它。
 
 源码可运行 `.venv/Scripts/pythonw.exe desktop.pyw`；需要自行准备 `vendor/agent-wechat/wx.exe`（v2.2.0，对应校验值在 `desktop_app.py`），便携包已包含此组件及许可说明。独立配置向导和原有启动方式继续保留。
+
+## Ubuntu 安装与使用（x64 预览版）
+
+[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.1/Workdesk_1.1.0-preview.1_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.1/Workdesk-Ubuntu-Guide.txt)
+
+面向 Ubuntu 22.04 / 24.04 **amd64（x86_64）桌面环境**，不适用于 ARM64。已在 WSL Ubuntu 22.04 / Python 3.10 中验证安装、Tk 界面、本地后台接口、钥匙串及暂停保护；Ubuntu 24.04 和独立 Ubuntu 桌面的真实扫码、文字/图片收发、AI 回复仍待实测，当前为预览版。
+
+在下载目录打开终端执行：
+
+```bash
+sudo apt install ./Workdesk_1.1.0-preview.1_amd64.deb
+```
+
+安装后从应用菜单打开 **Workdesk**，或运行 `workdesk`。使用普通桌面用户启动，不要用 `sudo workdesk`。
+
+1. 点击“准备后台”，再扫码并在手机上确认登录。手机可能显示 Linux 登录，也可能使另一电脑端微信退出。
+2. 点击“打开工作台”，在网页中选择联系人或群聊，查看消息、发送文字和图片。
+3. 如需自动回复，填写自己的 API 地址、模型、API 密钥及回复风格，选择接管对象，保存后点击开启。AI 默认关闭。
+4. 使用暂停按钮停止自动回复；手动暂停不会被守护进程自动恢复。异常退出可自动重启监听，但电脑关机或退出桌面会话不保证继续运行；没有配置开机自启。
+
+Linux 版仅提供 Agent WeChat 原生后台连接，不通过桌面鼠标、键盘或剪贴板收发；不包含 Windows UIA/OCR 和 WindowOpacity。端口为本机 `6175`（后台）与 `18765`（网页），不要开放到公网。
+
+包内包含 Workdesk 源码、网页资源、Agent WeChat 2.2.0 Linux x64 组件及许可。Python、Tk、Pillow、系统钥匙串等依赖由 `apt` 联网安装，**不是完全离线包**。无需手动创建 Python 虚拟环境。
+
+API 密钥由 Secret Service 系统钥匙串保存，首次使用可能要求解锁登录钥匙串；无可用或未解锁的钥匙串时需先处理系统提示。账号与运行配置默认位于 `~/.local/share/workdesk`（遵循 `XDG_DATA_HOME`），不会随安装包提供任何开发者账号、API 密钥或聊天记录。
+
+卸载使用 `sudo apt remove workdesk`；个人运行数据与钥匙串不会自动删除。发行包的 SHA-256 见同一 Release 的 `Workdesk-Ubuntu-SHA256.txt`。从源码启动 Linux 桌面入口时使用 `python3 desktop.pyw`，并自行放置经过 `desktop_app.py` 中 SHA-256 校验的上游 Linux v2.2.0 二进制到 `vendor/agent-wechat/wx`、赋予执行权限；推荐直接使用 `.deb`。
 
 ## 效果预览
 
@@ -57,7 +84,7 @@ Workdesk 是一个运行在 Windows 本机的微信界面辅助工具：将电�
 - 完整功能需要微信提供可用的界面文字控件；不同微信版本、系统版本及缩放设置的兼容性需要实际确认。
 - OCR 备用方式依赖 Windows 的文字识别语言支持；没有可用语言时，需要安装相应语言包。
 
-不支持 macOS 和 Linux。无需开放防火墙端口或部署公网服务。
+Ubuntu x64 可使用下述原生后台预览版，不支持 Windows UIA/OCR 模式；macOS 暂不支持。无需开放防火墙端口或部署公网服务。
 
 ## 从源码运行
 
@@ -83,7 +110,7 @@ py -3.12 -m venv .venv
 
 ## 可选：Agent WeChat 原生后台连接
 
-此模式使用独立项目 [Agent WeChat](https://github.com/thisnick/agent-wechat) 的本机 API，已在 Windows 上对接 v2.2.0。需要自行安装、启动并登录该服务；Workdesk 不附带其程序、登录态或访问令牌。登录设备可能显示为 Linux，并可能挤掉原有电脑微信会话，请留意手机上的设备提示。
+此模式使用独立项目 [Agent WeChat](https://github.com/thisnick/agent-wechat) 的本机 API，已在 Windows 上对接 v2.2.0。需要自行安装、启动并登录该服务；源码仓库不附带其二进制；桌面发行包附带固定版本组件及许可说明，但不附带登录态或访问令牌。登录设备可能显示为 Linux，并可能挤掉原有电脑微信会话，请留意手机上的设备提示。
 
 在源码目录的 `.runtime/native-backend.json` 创建本机配置（不要提交或分享）：
 

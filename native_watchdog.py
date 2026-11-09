@@ -1,3 +1,4 @@
+from host_runtime import data_home, python_gui, background, lock_file
 """Local listener supervisor. Never activates windows or sends messages itself."""
 import json
 import os
@@ -44,16 +45,15 @@ class Supervisor:
             return 'paused'
         self.attempts += 1
         self.next_start = time.monotonic() + min(60, 5 * 2 ** min(self.attempts - 1, 4))
-        python = Path(sys.executable).with_name('pythonw.exe')
+        python = python_gui()
         self.child = subprocess.Popen((command('listener', self.root)
                           if (self.root / 'private-data/workdesk-native-ai.json').exists() else
                           [str(python), str(self.root / 'global_listener.py')]),
-                                      cwd=self.root, creationflags=subprocess.CREATE_NO_WINDOW)
+                                      cwd=self.root, **background())
         return 'restarting'
 
 
 def main(root):
-    import msvcrt
     guard = Supervisor(root)
     with (guard.private / 'watchdog.lock').open('a+b') as lock:
         lock.seek(0)
@@ -62,7 +62,7 @@ def main(root):
             lock.flush()
         lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            lock_file(lock)
         except OSError:
             return
         while True:
