@@ -4,9 +4,9 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 提供两种接入方式：默认通过 Windows UI Automation 读取已登录的电脑版微信，文字控件不可用时尝试本地 OCR；可选 Agent WeChat 原生后台连接，通过本机 HTTP 接口收发消息，不操作桌面鼠标、键盘或剪贴板。本项目不是微信官方网页版。
 
-**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.7)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
+**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.8)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
 
-> v1.1.0-preview.7 同时提供 Windows x64 便携 ZIP 和 Ubuntu amd64 DEB。两者共享连接修复、目录导航、AI 联网与聊天表达代码；Windows 包由 Windows runner 构建并进行依赖自检。真实微信收发兼容性仍需在目标电脑验证，不含 WindowOpacity。
+> v1.1.0-preview.8 同时提供 Windows x64 便携 ZIP 和 Ubuntu amd64 DEB。两者共享连接修复、目录导航、AI 联网与聊天表达代码；Windows 包由 Windows runner 构建并进行依赖自检。真实微信收发兼容性仍需在目标电脑验证，不含 WindowOpacity。
 
 ## 文件传输助手个人通道与语音
 
@@ -37,13 +37,13 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 | --- | --- |
 | ![桌面连接页](docs/screenshots/desktop/connection.png) | ![桌面状态页](docs/screenshots/desktop/status.png) |
 
-## preview.7 更新与平台范围
+## preview.8 更新与平台范围
 
 - 修复后台重启后旧网页凭据失效、点击“重新连接”仍无法恢复的问题。同源页面自动取得当前凭据并重试；不开放跨站获取凭据，也不要求退出微信。服务完全退出时仍需桌面入口启动。
 - 修复慢请求结果丢失与联系人目录全量读取造成的长时间等待；目录逐页加载。
 - 好友、群聊与公众号分层展示；公众号内可返回主目录，返回后不会被刷新自动拉回公众号。
-- 桌面原生 AI 设置支持按需联网，以及按请求生成/发送图片和静态表情图片；均为可选开关，需要上游工具支持。
-- 集成 [Humanizer-zh](https://github.com/op7418/Humanizer-zh) 的表达原则：减少模板开场、机械追问和重复套话。精简规则在同一次请求生效，完整参考与 MIT 许可证保留在 `third_party/humanizer-zh`；不承诺无法识别 AI，不编造个人经历。
+- 桌面原生 AI 设置支持按需联网，以及按请求或贴合当前话题与情绪主动生成/发送图片和静态表情图片；均为可选开关，需要上游工具支持。
+- 集成 [Humanizer-zh](https://github.com/op7418/Humanizer-zh) 的表达原则：减少模板开场、机械追问和重复套话。按分享、吐槽、玩笑和认真求助调整表达；可自然使用 emoji，并在贴合上下文时主动配图，不按固定轮数或时间发送。近期已发送图片会进入上下文，减少机械重复。精简规则在同一次请求生效，完整参考与 MIT 许可证保留在 `third_party/humanizer-zh`；不承诺无法识别 AI，不编造个人经历。
 - 文字追问会携带近期收到的图片上下文（最近 12 条记录内，总附件最多 4 个），避免刚发完图片后追问却丢失图片。图片获取失败时不编造已看到的内容。
 - Linux 修复已退出僵尸监听器阻止重新开启的问题。
 
@@ -59,7 +59,7 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## 桌面控制台（本地预览版）
 
-新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.7 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
+新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.8 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
 
 - 后台模式：自动准备本机服务 → 扫码登录 → 打开工作台；AI 在控制台中配置，选择联系人或群聊，保存后默认暂停，确认授权再点击开启。
 - 官方窗口模式：选择对应选项，自行登录电脑版微信，然后打开工作台；AI 配置使用网页内的设置。
@@ -71,14 +71,14 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## Ubuntu 安装与使用（x64 预览版）
 
-[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.7/Workdesk_1.1.0-preview.7_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk#ubuntu-安装与使用x64-预览版)
+[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.8/Workdesk_1.1.0-preview.8_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk#ubuntu-安装与使用x64-预览版)
 
 面向 Ubuntu 22.04 / 24.04 **amd64（x86_64）桌面环境**，不适用于 ARM64。已在 WSL Ubuntu 22.04 / Python 3.10 中验证安装、Tk 界面、本地后台接口、钥匙串及暂停保护；Ubuntu 24.04 和独立 Ubuntu 桌面的真实扫码、文字/图片收发、AI 回复仍待实测，当前为预览版。
 
 在下载目录打开终端执行：
 
 ```bash
-sudo apt install ./Workdesk_1.1.0-preview.7_amd64.deb
+sudo apt install ./Workdesk_1.1.0-preview.8_amd64.deb
 ```
 
 安装后从应用菜单打开 **Workdesk**，或运行 `workdesk`。使用普通桌面用户启动，不要用 `sudo workdesk`。
@@ -460,7 +460,7 @@ cd D:\AgentWeChat
 
 本项目为非官方界面辅助工具，与腾讯或微信官方无关联。
 
-## 构建 preview.7 发行包
+## 构建 preview.8 发行包
 
 构建只收集源码、网页、第三方许可证和校验后的 Agent WeChat v2.2.0，不读取本机运行目录。Windows 与 Linux 均在目标平台原生打包：
 
@@ -475,6 +475,6 @@ python -m pip install -r scripts/requirements-windows.txt
 python scripts/build_release.py windows
 ```
 
-输出位于 `dist/`，每个包附 `.sha256`。Windows 构建会在独立用户数据目录执行包内自检。GitHub Actions 的 `Build desktop releases` 同时运行两平台回归测试和构建；推送 `v1.1.0-preview.7` 标签后，两平台构建均成功才发布预览 Release。
+输出位于 `dist/`，每个包附 `.sha256`。Windows 构建会在独立用户数据目录执行包内自检。GitHub Actions 的 `Build desktop releases` 同时运行两平台回归测试和构建；推送 `v1.1.0-preview.8` 标签后，两平台构建均成功才发布预览 Release。
 
 测试：`python -m unittest discover -s tests -v` 与 `node tests/test_refresh.cjs`。自动化测试使用合成数据，不向微信联系人发送消息，也不能代替目标机器上的扫码与真实收发验收。
