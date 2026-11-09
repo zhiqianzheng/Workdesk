@@ -203,7 +203,17 @@ class Platform:
             data.setdefault('webSearch', old.get('webSearch', False))
             data.setdefault('mediaReplies', old.get('mediaReplies', False))
             data.setdefault('videoAnalysis',old.get('videoAnalysis',False))
+            data.setdefault('voiceReplies',old.get('voiceReplies',False))
+            data.setdefault('voiceLanguage',old.get('voiceLanguage','zh'))
+            data.setdefault('ownerAssistant',old.get('ownerAssistant',False))
             config = AutoReply.validate(data)
+            if config['ownerAssistant'] and not old.get('ownerAssistant') and not data.get('ownerConsent'):
+                raise ValueError('首次开启文件传输助手个人对话，请先确认会话提交与自动回复授权。')
+            import uuid
+            changed=config['ownerAssistant']!=old.get('ownerAssistant',False)
+            config['ownerEpoch']=uuid.uuid4().hex if changed else old.get('ownerEpoch','')
+            config['ownerSince']=time.time() if changed else old.get('ownerSince',0)
+            config['ownerStartCursor']=str(self.connection.request('threads?limit=1')['asOfEventCursor']) if changed and config['ownerAssistant'] else old.get('ownerStartCursor')
             if not config['allContacts'] and not config['contacts']:
                 raise ValueError('请选择至少一个接管对象，或明确选择全部好友与群聊。')
             config['account'] = self.account

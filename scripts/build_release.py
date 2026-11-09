@@ -11,7 +11,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist'
-VERSION = '1.1.0-preview.6'
+VERSION = '1.1.0-preview.7'
 HASHES = {'windows': '01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c',
           'linux': '0b59f03ace18358d0606df1eb15e0495016aabe07208da8c45dc785b70de93b3'}
 
@@ -54,7 +54,10 @@ def linux():
     copy_app(app)
     from install_video_tools import install
     install(app / '_vendor')
+    from install_speech_tools import install as speech_install
+    speech_install(app / 'vendor/speech')
     subprocess.run([sys.executable,'-c','from native_video import self_check; assert self_check()'],cwd=app,check=True)
+    subprocess.run([sys.executable,'-c','from native_voice import self_check; assert self_check()'],cwd=app,check=True)
     shutil.copytree(vendor, app / 'vendor/agent-wechat', ignore=shutil.ignore_patterns('wx.exe'))
     control = stage / 'DEBIAN'
     control.mkdir()
@@ -64,7 +67,7 @@ Architecture: amd64
 Maintainer: Workdesk Project
 Section: net
 Priority: optional
-Depends: python3 (>= 3.10), python3-tk, python3-pil, python3-pil.imagetk, libsecret-tools, gnome-keyring, dbus-user-session, ca-certificates, xdg-utils, libc6 (>= 2.35), libgcc-s1
+Depends: python3 (>= 3.10), python3-tk, python3-pil, python3-pil.imagetk, libsecret-tools, gnome-keyring, dbus-user-session, ca-certificates, xdg-utils, libc6 (>= 2.35), libgcc-s1, libstdc++6
 Description: Local Workdesk desktop and native messaging backend
  Desktop preview with optional configurable AI replies.
 '''.format(version=VERSION.replace('-preview.', '~preview.')))
@@ -91,11 +94,13 @@ Description: Local Workdesk desktop and native messaging backend
 
 def windows():
     download_native('windows')
+    from install_speech_tools import install as speech_install
+    speech_install(ROOT / 'vendor/speech')
     command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--windowed',
                '--name', 'Workdesk', '--icon', str(ROOT / 'assets/workdesk.ico')]
     for source in ROOT.glob('*.py'):
         command += ['--hidden-import', source.stem]
-    for name in ('web', 'third_party', 'assets', 'vendor/agent-wechat'):
+    for name in ('web', 'third_party', 'assets', 'vendor/agent-wechat','vendor/speech'):
         command += ['--add-data', str(ROOT / name) + os.pathsep + name]
     for name in ('uiautomation', 'comtypes', 'winsdk', 'windows_capture', 'imageio_ffmpeg'):
         command += ['--collect-all', name]
@@ -110,7 +115,7 @@ def windows():
     env['LOCALAPPDATA'] = str(isolated)
     report = DIST / 'windows-self-check.json'
     process = subprocess.Popen([str(bundle / 'Workdesk.exe'), '--self-check', str(report)], env=env)
-    if process.wait(timeout=60) != 0 or not report.exists() or not json.loads(report.read_text())['ok']:
+    if process.wait(timeout=150) != 0 or not report.exists() or not json.loads(report.read_text())['ok']:
         raise RuntimeError('Packaged Windows self-check failed')
     return Path(shutil.make_archive(str(DIST / f'Workdesk-Desktop-v{VERSION}-Windows-x64'), 'zip', DIST, 'Workdesk'))
 

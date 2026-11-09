@@ -45,7 +45,7 @@ class NativeConnection:
         self.previews = Previews(self)
 
     def request(self, path, data=None, request_id=None):
-        headers = {'Authorization': 'Bearer ' + (self.root / 'private-data/api-token').read_text().strip()}
+        headers = {'Authorization': 'Bearer ' + (self.root / 'private-data/api-token').read_text(encoding='utf-8').strip()}
         if data is not None:
             headers['Content-Type'] = 'application/json'
         if request_id:
@@ -301,7 +301,7 @@ class NativeAI:
                 if sys.platform.startswith('linux'):
                     try:
                         # kill(pid, 0) also succeeds for an exited, unreaped child.
-                        status = Path('/proc/%s/stat' % pid).read_text().rsplit(')', 1)[1].split()[0]
+                        status = Path('/proc/%s/stat' % pid).read_text(encoding='utf-8').rsplit(')', 1)[1].split()[0]
                         if status in ('Z', 'X'):
                             return False
                     except FileNotFoundError:
@@ -338,7 +338,7 @@ class NativeAI:
         config_file = self.root / 'private-data/workdesk-native-ai.json'
         if config_file.exists():
             saved = json.loads(config_file.read_text(encoding='utf-8'))
-            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False), 'videoAnalysis':saved.get('videoAnalysis',False)}
+            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False), 'videoAnalysis':saved.get('videoAnalysis',False), 'voiceReplies':saved.get('voiceReplies',False), 'ownerAssistant':saved.get('ownerAssistant',False)}
         self.lifecycle_lock = threading.Lock()
         self.start_requested = 0
         if (self.root / 'private-data/watchdog.enabled').exists():
@@ -347,7 +347,7 @@ class NativeAI:
     def ensure_watchdog(self):
         path = self.root / 'private-data/watchdog-status.json'
         try:
-            status = json.loads(path.read_text())
+            status = json.loads(path.read_text(encoding='utf-8'))
             if self.process_alive(status.get('pid')):
                 return
         except (OSError, ValueError):
@@ -361,14 +361,19 @@ class NativeAI:
         try:
             saved = json.loads((self.root / 'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
             self.config = {'allContacts': saved.get('allContacts', False),
-                           'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False), 'videoAnalysis':saved.get('videoAnalysis',False)}
+                           'contacts': saved.get('contacts', []), 'webSearch': saved.get('webSearch', False), 'mediaReplies': saved.get('mediaReplies', False), 'videoAnalysis':saved.get('videoAnalysis',False), 'voiceReplies':saved.get('voiceReplies',False), 'ownerAssistant':saved.get('ownerAssistant',False)}
         except (OSError, ValueError):
             pass
         status_path = self.root / 'private-data/global-status.json'
-        status = json.loads(status_path.read_text()) if status_path.exists() else {}
+        status = json.loads(status_path.read_text(encoding='utf-8')) if status_path.exists() else {}
         stopping = (self.root / 'private-data/global.stop').exists()
         try:
-            supervisor = json.loads((self.root / 'private-data/watchdog-status.json').read_text())
+            personal=json.loads((self.root/'private-data/owner-assistant-status.json').read_text(encoding='utf-8'))
+        except (OSError,ValueError):personal={}
+        personal_ready=(self.process_alive(personal.get('pid')) and personal.get('state') in ('listening','working')
+                        and time.time()-personal.get('updatedAt',0)<30)
+        try:
+            supervisor = json.loads((self.root / 'private-data/watchdog-status.json').read_text(encoding='utf-8'))
             controls_active = (self.process_alive(supervisor.get('pid'))
                                and time.time() - supervisor.get('updatedAt', 0) < 15
                                and not supervisor.get('controlError'))
@@ -381,12 +386,15 @@ class NativeAI:
                          '原生 AI 监听进程已退出，等待后台守护恢复或手动恢复。' if not alive else
                          '原生 AI 心跳超时，进程仍在；暂无法确认正常回复。')
         return {'backend': 'native', 'enabled': active, 'allContacts': self.config['allContacts'], 'contacts': self.config.get('contacts', []),
+                'ownerHealth':{'state':personal.get('state','off'),'ready':personal_ready,'replies':personal.get('replies',0)},
                 'ownerCommands': controls_active,
-                'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False), 'videoAnalysis':self.config.get('videoAnalysis',False),
+                'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False), 'videoAnalysis':self.config.get('videoAnalysis',False), 'voiceReplies':self.config.get('voiceReplies',False), 'ownerAssistant':self.config.get('ownerAssistant',False),
                 'status': ('原生后台 AI 已开启，按已配置的接管范围回复。' if active else inactive_note) +
                           (' 已启用按需联网检索。' if self.config.get('webSearch') else '') +
                           (' 已启用图片回复。' if self.config.get('mediaReplies') else '') +
                           (' 已启用视频抽帧分析（不含音轨）。' if self.config.get('videoAnalysis') else '') +
+                          (' 已启用本地语音转写。' if self.config.get('voiceReplies') else '') +
+                          (' 文件传输助手个人通道独立开启。' if self.config.get('ownerAssistant') else '') +
                           (' 本人微信口令监听正常。' if controls_active else ' 本人微信口令监听尚未就绪。') +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
                 'metrics': {k: status.get(k, 0) for k in ('replies', 'active', 'queued', 'blocked')},
@@ -410,7 +418,7 @@ class NativeAI:
     def _start(self):
         from ai_reply import ReplyError
         path = self.root / 'private-data/global-status.json'
-        status = json.loads(path.read_text()) if path.exists() else {}
+        status = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
         if self.process_alive(status.get('pid')):
             if self.public()['enabled']:
                 return self.public()

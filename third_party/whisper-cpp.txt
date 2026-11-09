@@ -1,0 +1,9 @@
+Local voice transcription uses whisper.cpp v1.9.5 (MIT):
+https://github.com/ggml-org/whisper.cpp/tree/v1.9.5
+Its MIT license is bundled at vendor/speech/WHISPER-LICENSE.
+Original Whisper model copyright and MIT license: whisper-model-LICENSE
+https://github.com/openai/whisper/tree/v20250625
+Multilingual base weights: https://huggingface.co/ggerganov/whisper.cpp
+SHA-256: 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+Public test fixture: upstream samples/jfk.wav, used for packaged ASR smoke tests.
+No private user audio is included.

@@ -100,6 +100,9 @@ class OwnerControlTests(unittest.TestCase):
 
     def test_intent_aliases_but_not_substrings_or_negations(self):
         self.assertEqual(control_text(' 停止AI回复\n'), 'pause')
+        self.assertEqual(control_text('關閉 AI 回覆'), 'pause')
+        self.assertEqual(control_text('把個人助手關掉吧'), 'owner_pause')
+        self.assertEqual(control_text('請開啟個人助手'), 'owner_start')
         for text in ['关闭AI回复', '暂停 ai 回复。', '帮我先把AI自动回复关掉吧', '请关闭AI回复功能', '先关一下AI回复']:
             self.assertEqual(control_text(text), 'pause', text)
         for text in ['打开AI回复', '开启ＡＩ回复', '请恢复AI自动回复吧', '把AI回复打开', '现在启动AI回复']:
