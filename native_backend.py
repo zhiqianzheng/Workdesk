@@ -175,22 +175,61 @@ class NativeConnection:
 
 
 class NativeAI:
+    @staticmethod
+    def process_alive(pid):
+        # A stale heartbeat is not proof of process exit; never start a duplicate.
+        import ctypes
+        from ctypes import wintypes
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() != 87
+        try:
+            code = wintypes.DWORD()
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+        finally:
+            kernel.CloseHandle(handle)
+
     def __init__(self, settings, config_path):
         self.root = Path(settings['directory'])
         self.config_path = config_path
         self.config = {'allContacts': True}
         self.lifecycle_lock = threading.Lock()
         self.start_requested = 0
+        if (self.root / 'private-data/watchdog.enabled').exists():
+            self.ensure_watchdog()
+
+    def ensure_watchdog(self):
+        path = self.root / 'private-data/watchdog-status.json'
+        try:
+            status = json.loads(path.read_text())
+            if self.process_alive(status.get('pid')):
+                return
+        except (OSError, ValueError):
+            pass
+        python = Path(sys.executable).with_name('pythonw.exe')
+        subprocess.Popen([str(python), str(Path(__file__).with_name('native_watchdog.py')), str(self.root)],
+                         cwd=self.root, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def public(self):
         status_path = self.root / 'private-data/global-status.json'
         status = json.loads(status_path.read_text()) if status_path.exists() else {}
         stopping = (self.root / 'private-data/global.stop').exists()
         age = max(0, time.time() - status.get('updatedAt', 0))
-        active = status.get('state') in ('listening', 'retrying') and age < 60 and not stopping
+        alive = self.process_alive(status.get('pid'))
+        active = alive and status.get('state') in ('listening', 'retrying') and age < 60 and not stopping
+        inactive_note = ('原生 AI 已手动暂停，后台守护不会自动恢复。' if stopping else
+                         '原生 AI 监听进程已退出，等待后台守护恢复或手动恢复。' if not alive else
+                         '原生 AI 心跳超时，进程仍在；暂无法确认正常回复。')
         return {'backend': 'native', 'enabled': active, 'allContacts': True, 'contacts': [],
                 'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True,
-                'status': ('原生后台 AI 已开启：好友与普通群聊。' if active else '原生后台 AI 已暂停或暂不可用。') +
+                'status': ('原生后台 AI 已开启：好友与普通群聊。' if active else inactive_note) +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
                 'metrics': {'replies': status.get('replies', 0)},
                 'health': {'state': 'ready' if active else 'off', 'scanAgeSeconds': round(age, 1)}}
@@ -203,6 +242,8 @@ class NativeAI:
 
     def start(self):
         with self.lifecycle_lock:
+            (self.root / 'private-data/watchdog.enabled').touch()
+            self.ensure_watchdog()
             if time.monotonic() < self.start_requested:
                 return {**self.public(), 'status': '原生 AI 正在启动，请稍候。'}
             return self._start()
@@ -211,7 +252,7 @@ class NativeAI:
         from ai_reply import ReplyError
         path = self.root / 'private-data/global-status.json'
         status = json.loads(path.read_text()) if path.exists() else {}
-        if status.get('state') != 'stopped':
+        if self.process_alive(status.get('pid')):
             if self.public()['enabled']:
                 return self.public()
             raise ReplyError('监听进程尚未确认停止，请稍候再试。')
