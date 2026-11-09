@@ -1,0 +1,54 @@
+name: Build Android APK
+on:
+  workflow_dispatch:
+  push:
+    tags: ['android-v0.1.0-preview.1']
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: '15859902'
+          log-accepted-android-sdk-licenses: 'false'
+      - name: Install build and emulator packages
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'system-images;android-30;default;x86_64'
+      - name: Verify shared chat style
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from ai_style import CHAT_STYLE
+          assert Path('android/app/src/main/assets/chat_style.txt').read_text() == CHAT_STYLE
+          PY
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Native Android emulator acceptance
+        run: python scripts/test_android_emulator.py
+      - name: Build, lint and sign release APK
+        env:
+          WORKDESK_ANDROID_KEYSTORE_BASE64: ${{ secrets.WORKDESK_ANDROID_KEYSTORE_BASE64 }}
+          WORKDESK_ANDROID_STORE_PASSWORD: ${{ secrets.WORKDESK_ANDROID_STORE_PASSWORD }}
+        run: python scripts/build_android.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Workdesk-Android
+          path: |
+            dist/Workdesk-Android-*.apk
+            dist/Workdesk-Android-*.apk.sha256
+          if-no-files-found: error
+      - name: Publish Android preview
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/Workdesk-Android-*.apk dist/Workdesk-Android-*.apk.sha256 --prerelease --title 'Workdesk Android 0.1.0-preview.1' --notes-file docs/releases/android-v0.1.0-preview.1.md
