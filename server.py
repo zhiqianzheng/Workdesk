@@ -115,9 +115,15 @@ class Service:
 
     def read(self):
         with self.lock:
-            if self.read_future is None or self.read_future.done():
+            if self.read_future is None:
                 self.read_future = self.worker.submit(self.call, 'snapshot')
             return self.read_future
+
+    def consume_read(self, future):
+        # A read that outlives one HTTP poll must be delivered before replacing it.
+        with self.lock:
+            if self.read_future is future:
+                self.read_future = None
 
     def action(self, method, *args):
         with self.lock:
@@ -128,6 +134,7 @@ class Service:
                 self.history_binding = args[0]
             elif method == 'search' and args[0]:
                 self.search_active = True
+            self.read_future = None
             self.action_future = self.worker.submit(self.call, method, *args)
             return self.action_future
 
@@ -144,6 +151,7 @@ class Service:
             if self.action_future is not None and not self.action_future.done():
                 raise ValueError('上一项操作仍在进行，请先检查结果。')
             self.manual_until = time.monotonic() + (1 if self.ai.config.get('allContacts') else 5)
+            self.read_future = None
             future = self.worker.submit(self.call, {'image': 'send_image', 'file': 'send_file', 'download': 'download_file'}.get(kind, 'send'), binding, text)
             self.action_future = future
             self.sends[request_id] = fingerprint, future
@@ -172,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
             if code >= 400 and self.close_connection:
                 # Deliver the rejection before closing a socket with an unread POST body.
                 self.connection.shutdown(socket.SHUT_WR)
-        except (BrokenPipeError, ConnectionResetError):
+        except OSError:
             pass
 
     def allowed(self, api=False):
@@ -201,9 +209,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == '/api/state':
             try:
-                self.respond(200, self.server.service.read().result(timeout=9))
+                future = self.server.service.read()
+                result = future.result(timeout=1)
+                self.server.service.consume_read(future)
+                self.respond(200, result)
             except TimeoutError:
-                self.respond(503, {'error': '微信界面响应较慢，请稍后刷新。'})
+                self.respond(202, {'pending': True, 'detail': '正在读取微信后台会话，请稍候；完成后会自动更新。'})
             return
         if self.path == '/api/send-status':
             self.respond(405, {'error': 'Use POST'})
@@ -221,6 +232,19 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200, (ROOT / 'web' / name).read_bytes(), content_type)
 
     def do_POST(self):
+        if self.path == '/api/session/reconnect':
+            # A restarted viewer rotates its bearer token. Only an explicit
+            # same-origin browser request may obtain the replacement; no CORS.
+            if not self.allowed():
+                return
+            origin = 'http://127.0.0.1:' + str(self.server.server_port)
+            if (self.headers.get('Origin') != origin or
+                    self.headers.get('X-Workdesk-Reconnect') != '1' or
+                    self.headers.get('Sec-Fetch-Site') not in (None, 'same-origin')):
+                self.respond(403, {'error': '请在本机工作台页面重新连接。'})
+                return
+            self.respond(200, {'token': self.server.service.token})
+            return
         if not self.allowed(api=True):
             return
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':

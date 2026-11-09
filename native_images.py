@@ -22,7 +22,9 @@ def image_bytes(encoded):
         if source.format not in ('PNG', 'JPEG', 'WEBP') or source.width * source.height > 24000000:
             raise ValueError('图片格式或尺寸不支持。')
         source.load()
-        picture = ImageOps.exif_transpose(source).convert('RGB')
+        rgba = ImageOps.exif_transpose(source).convert('RGBA')
+        picture = Image.new('RGB', rgba.size, 'white')
+        picture.paste(rgba, mask=rgba.getchannel('A'))
     out = io.BytesIO()
     picture.save(out, 'PNG')
     if out.tell() > 32 * 1024 * 1024:
@@ -104,9 +106,11 @@ class Previews:
         self.pool.shutdown(wait=False, cancel_futures=True)
 
 
-def send_image(connection, binding, encoded):
+def send_image(connection, binding, encoded, request_id=None, should_stop=None):
     from native_backend import key
     recipient = connection.selected
+    if should_stop and should_stop():
+        return {'state': 'not_sent', 'detail': '已暂停，未发送图片。'}
     if not connection.selected or key(connection.selected) != binding:
         return {'state': 'not_sent', 'detail': '会话已变化，未发送图片。'}
     if not connection.writable(connection.info()):
@@ -119,11 +123,11 @@ def send_image(connection, binding, encoded):
         upload = json.loads(binary(connection, 'uploads', body, 'multipart/form-data; boundary=' + boundary))
     except Exception:
         return {'state': 'not_sent', 'detail': '图片校验或上传失败，尚未提交发送，可重试。'}
-    if connection.selected != recipient or key(recipient) != binding:
+    if (should_stop and should_stop()) or connection.selected != recipient or key(recipient) != binding:
         return {'state': 'not_sent', 'detail': '上传期间会话已变化，未发送图片。'}
     try:
         job = connection.request('sends', {'threadId': recipient, 'kind': 'image', 'sourceId': upload['id']},
-                                 'workdesk-image-' + str(uuid.uuid4()))
+                                 request_id or 'workdesk-image-' + str(uuid.uuid4()))
         deadline = time.monotonic() + 90
         while job.get('state') in ('queued', 'running', 'preparing', 'uploading', 'submitting') and time.monotonic() < deadline:
             time.sleep(.3)
