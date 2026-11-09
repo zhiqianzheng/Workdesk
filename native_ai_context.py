@@ -3,9 +3,13 @@ from types import SimpleNamespace
 
 from native_images import Previews
 from native_files import is_file, fetch_file, document_text
+from native_controls import control_text
 
 
 def replyable(row):
+    # Other people's control requests are ignored, not answered or obeyed.
+    if row.get('type') == 1 and control_text(row.get('body')):
+        return False
     return row.get('direction') == 'incoming' and (
         row.get('type') == 3 or is_file(row) or (row.get('type') == 1 and bool(row.get('body', '').strip())))
 
@@ -14,6 +18,7 @@ def context_for(rows, received, root, base, request):
     latest = max(row.get('createdAt', '') for row in received)
     targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row)}
     ordered = sorted(rows, key=lambda row: (row.get('createdAt', ''), str(row.get('serverId', ''))))
+    ordered = [row for row in ordered if not (row.get('type') == 1 and control_text(row.get('body')))]
     recent = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
               and row.get('createdAt', '') <= latest][-12:]
     # A text follow-up ("which of these two?") needs the preceding pictures too.

@@ -11,7 +11,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist'
-VERSION = '1.1.0-preview.3'
+VERSION = '1.1.0-preview.4'
 HASHES = {'windows': '01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c',
           'linux': '0b59f03ace18358d0606df1eb15e0495016aabe07208da8c45dc785b70de93b3'}
 
@@ -56,7 +56,7 @@ def linux():
     control = stage / 'DEBIAN'
     control.mkdir()
     (control / 'control').write_text('''Package: workdesk
-Version: 1.1.0~preview.3
+Version: {version}
 Architecture: amd64
 Maintainer: Workdesk Project
 Section: net
@@ -64,7 +64,7 @@ Priority: optional
 Depends: python3 (>= 3.10), python3-tk, python3-pil, python3-pil.imagetk, libsecret-tools, gnome-keyring, dbus-user-session, ca-certificates, xdg-utils, libc6 (>= 2.35), libgcc-s1
 Description: Local Workdesk desktop and native messaging backend
  Desktop preview with optional configurable AI replies.
-''')
+'''.format(version=VERSION.replace('-preview.', '~preview.')))
     launcher = stage / 'usr/bin/workdesk'
     launcher.parent.mkdir(parents=True)
     launcher.write_text('#!/bin/sh\nexec /usr/bin/python3 /usr/lib/workdesk/desktop.pyw "$@"\n')

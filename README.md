@@ -4,11 +4,11 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 提供两种接入方式：默认通过 Windows UI Automation 读取已登录的电脑版微信，文字控件不可用时尝试本地 OCR；可选 Agent WeChat 原生后台连接，通过本机 HTTP 接口收发消息，不操作桌面鼠标、键盘或剪贴板。本项目不是微信官方网页版。
 
-**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.3)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
+**直接使用：** [下载桌面控制台预览版](https://github.com/zhiqianzheng/Workdesk/releases/tag/v1.1.0-preview.4)。完整解压后双击 `Workdesk.exe`，在控制台完成扫码、AI 配置和网页启动，无需安装 Python 或输入命令。旧版 WindowOpacity 组合包仍在历史 Release 中。
 
-> v1.1.0-preview.3 同时提供 Windows x64 便携 ZIP 和 Ubuntu amd64 DEB。两者共享连接修复、目录导航、AI 联网与聊天表达代码；Windows 包由 Windows runner 构建并进行依赖自检。真实微信收发兼容性仍需在目标电脑验证，不含 WindowOpacity。
+> v1.1.0-preview.4 同时提供 Windows x64 便携 ZIP 和 Ubuntu amd64 DEB。两者共享连接修复、目录导航、AI 联网与聊天表达代码；Windows 包由 Windows runner 构建并进行依赖自检。真实微信收发兼容性仍需在目标电脑验证，不含 WindowOpacity。
 
-## preview.3 更新与平台范围
+## preview.4 更新与平台范围
 
 - 修复后台重启后旧网页凭据失效、点击“重新连接”仍无法恢复的问题。同源页面自动取得当前凭据并重试；不开放跨站获取凭据，也不要求退出微信。服务完全退出时仍需桌面入口启动。
 - 修复慢请求结果丢失与联系人目录全量读取造成的长时间等待；目录逐页加载。
@@ -30,7 +30,7 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## 桌面控制台（本地预览版）
 
-新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.3 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
+新增 `desktop.pyw` 桌面入口，配套便携包可完整解压后双击 `Workdesk.exe`，不需要安装 Python、编辑 JSON 或输入命令。此入口自动准备随包附带的固定版本 Agent WeChat；用户仍需自己扫码确认、填写模型服务的 API 与密钥，并选择接管范围。请下载 v1.1.0-preview.4 的 ZIP 附件，不要将 GitHub 的 Source code ZIP 当成便携包。
 
 - 后台模式：自动准备本机服务 → 扫码登录 → 打开工作台；AI 在控制台中配置，选择联系人或群聊，保存后默认暂停，确认授权再点击开启。
 - 官方窗口模式：选择对应选项，自行登录电脑版微信，然后打开工作台；AI 配置使用网页内的设置。
@@ -42,14 +42,14 @@ Workdesk 是一个运行在 Windows 或 Ubuntu 本机的微信界面辅助工具
 
 ## Ubuntu 安装与使用（x64 预览版）
 
-[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.3/Workdesk_1.1.0-preview.3_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk#ubuntu-安装与使用x64-预览版)
+[下载 Ubuntu `.deb` 安装包](https://github.com/zhiqianzheng/Workdesk/releases/download/v1.1.0-preview.4/Workdesk_1.1.0-preview.4_amd64.deb) · [使用说明](https://github.com/zhiqianzheng/Workdesk#ubuntu-安装与使用x64-预览版)
 
 面向 Ubuntu 22.04 / 24.04 **amd64（x86_64）桌面环境**，不适用于 ARM64。已在 WSL Ubuntu 22.04 / Python 3.10 中验证安装、Tk 界面、本地后台接口、钥匙串及暂停保护；Ubuntu 24.04 和独立 Ubuntu 桌面的真实扫码、文字/图片收发、AI 回复仍待实测，当前为预览版。
 
 在下载目录打开终端执行：
 
 ```bash
-sudo apt install ./Workdesk_1.1.0-preview.3_amd64.deb
+sudo apt install ./Workdesk_1.1.0-preview.4_amd64.deb
 ```
 
 安装后从应用菜单打开 **Workdesk**，或运行 `workdesk`。使用普通桌面用户启动，不要用 `sudo workdesk`。
@@ -81,6 +81,19 @@ API 密钥由 Secret Service 系统钥匙串保存，首次使用可能要求解
 python3 -m unittest discover -s tests -v
 node tests/test_refresh.cjs
 ```
+
+## 本人微信口令：全局暂停与恢复（原生后台模式）
+
+启用过后台 AI 并保持后台服务运行后，你可以在任意微信会话发送口令，包括文件传输助手。不需要该会话在接管名单内：
+
+- 暂停：`停止AI回复`、`关闭AI回复`、`暂停 AI 回复`、`帮我把AI自动回复关掉吧`。
+- 恢复：`开启AI回复`、`打开AI回复`、`恢复AI自动回复`、`把AI回复打开`。
+
+只处理本机后台确认属于**当前账号发出**的新文字消息；好友和群成员发来的口令不能控制全局开关。大小写、全角 AI、空格、常见礼貌说法和句尾标点均可识别。采用本地意图规则，不调用模型决定权限；转述、引号引用、否定句及疑问句不触发。不是包含关键词就执行。
+
+口令监视器独立于回复进程，暂停后继续监听，通常约 2 秒轮询一次。停止后不再提交新回复；已提交的消息无法撤回。开启时等待旧任务安全结束，再按已保存的接管范围恢复，不扩大名单、不补回暂停期间旧消息、不重发结果未知的发送。已有模型请求可能需要等待超时，图片请求最多 240 秒。后来的控制台手动暂停会覆盖尚未完成的开启请求。
+
+口令本身是正常微信消息，不另外向会话发送开关确认；可在控制台检查 AI 与本人微信口令监听状态。聊天里的命令不替代首次 API 配置和接管授权。原生后台退出、账号离线或电脑关机时无法接收口令；Windows UIA/OCR 模式暂不提供此后台口令能力。
 
 ## AI 按需联网检索（Windows / Ubuntu）
 
@@ -397,7 +410,7 @@ cd D:\AgentWeChat
 
 本项目为非官方界面辅助工具，与腾讯或微信官方无关联。
 
-## 构建 preview.3 发行包
+## 构建 preview.4 发行包
 
 构建只收集源码、网页、第三方许可证和校验后的 Agent WeChat v2.2.0，不读取本机运行目录。Windows 与 Linux 均在目标平台原生打包：
 
@@ -412,6 +425,6 @@ python -m pip install -r scripts/requirements-windows.txt
 python scripts/build_release.py windows
 ```
 
-输出位于 `dist/`，每个包附 `.sha256`。Windows 构建会在独立用户数据目录执行包内自检。GitHub Actions 的 `Build desktop releases` 同时运行两平台回归测试和构建；推送 `v1.1.0-preview.3` 标签后，两平台构建均成功才发布预览 Release。
+输出位于 `dist/`，每个包附 `.sha256`。Windows 构建会在独立用户数据目录执行包内自检。GitHub Actions 的 `Build desktop releases` 同时运行两平台回归测试和构建；推送 `v1.1.0-preview.4` 标签后，两平台构建均成功才发布预览 Release。
 
 测试：`python -m unittest discover -s tests -v` 与 `node tests/test_refresh.cjs`。自动化测试使用合成数据，不向微信联系人发送消息，也不能代替目标机器上的扫码与真实收发验收。

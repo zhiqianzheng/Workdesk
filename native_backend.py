@@ -363,17 +363,26 @@ class NativeAI:
         status_path = self.root / 'private-data/global-status.json'
         status = json.loads(status_path.read_text()) if status_path.exists() else {}
         stopping = (self.root / 'private-data/global.stop').exists()
+        try:
+            supervisor = json.loads((self.root / 'private-data/watchdog-status.json').read_text())
+            controls_active = (self.process_alive(supervisor.get('pid'))
+                               and time.time() - supervisor.get('updatedAt', 0) < 15
+                               and not supervisor.get('controlError'))
+        except (OSError, ValueError):
+            controls_active = False
         age = max(0, time.time() - status.get('updatedAt', 0))
         alive = self.process_alive(status.get('pid'))
         active = alive and status.get('state') in ('listening', 'retrying') and age < 60 and not stopping
-        inactive_note = ('原生 AI 已手动暂停，后台守护不会自动恢复。' if stopping else
+        inactive_note = ('原生 AI 已暂停；可点击恢复，或由本人发送“开启AI回复”恢复。' if stopping else
                          '原生 AI 监听进程已退出，等待后台守护恢复或手动恢复。' if not alive else
                          '原生 AI 心跳超时，进程仍在；暂无法确认正常回复。')
         return {'backend': 'native', 'enabled': active, 'allContacts': self.config['allContacts'], 'contacts': self.config.get('contacts', []),
+                'ownerCommands': controls_active,
                 'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False),
                 'status': ('原生后台 AI 已开启，按已配置的接管范围回复。' if active else inactive_note) +
                           (' 已启用按需联网检索。' if self.config.get('webSearch') else '') +
                           (' 已启用图片回复。' if self.config.get('mediaReplies') else '') +
+                          (' 本人微信口令监听正常。' if controls_active else ' 本人微信口令监听尚未就绪。') +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
                 'metrics': {'replies': status.get('replies', 0)},
                 'health': {'state': 'ready' if active else 'off', 'scanAgeSeconds': round(age, 1)}}
