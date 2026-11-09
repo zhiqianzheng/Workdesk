@@ -402,3 +402,7 @@
 
 .directory-actions{flex-wrap:wrap}
 @media(max-width:720px){.directory-actions{display:flex}}
+/* Native AI runs independently; only expose its actual lifecycle controls. */
+#aiSettings.native-ai > label, #aiSettings.native-ai .ai-contact-heading,
+#aiSettings.native-ai .ai-contacts, #aiSettings.native-ai .ai-notice,
+#aiSettings.native-ai #aiSave { display: none; }

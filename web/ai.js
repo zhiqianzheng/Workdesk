@@ -46,13 +46,15 @@
   byId('aiSettings').showModal();status('正在读取配置…');
   try{
    const config=await api('/api/ai/status');display(config);
+   byId('aiSettings').classList.toggle('native-ai',config.backend==='native');
+   byId('aiStart').textContent=config.backend==='native'?'恢复后台 AI':'保存并启用';
    byId('aiEndpoint').value=config.endpoint;byId('aiModel').value=config.model;
    byId('aiKey').value='';byId('aiKey').placeholder=config.hasKey?'密钥已保存；留空保留':'本机模型可留空';
    byId('aiStyle').value=config.style;byId('aiInterval').value=config.interval;
    byId('aiAllContacts').checked=!!config.allContacts;
    byId('aiClearKey').checked=false;byId('aiConsent').checked=false;
    selected=new Set(config.contacts);contacts();
-   fields().forEach(field=>field.disabled=false);
+   fields().forEach(field=>field.disabled=config.backend==='native' && !['aiStart','aiPauseDialog'].includes(field.id));
   }catch(error){status(error.message,true);}finally{configLoading=false;}
  };
  byId('aiClose').onclick=()=>byId('aiSettings').close();
@@ -63,6 +65,10 @@
  };
  async function save(start){
   if(configLoading)return;
+  if(saved?.backend==='native'){
+   if(start){try{display(await api('/api/ai/start',{}));}catch(error){status(error.message,true);}}
+   return;
+  }
   if(start&&!byId('aiConsent').checked)return status('启用前请勾选文字传送与自动发送授权。',true);
   if(start&&(demo||busy||historyBrowsing||lastSend?.unresolved||byId('draft').value.trim()||
       [...drafts.values()].some(v=>String(v).trim())||imageDrafts.size))return status('请先退出预览或历史浏览，并处理未发送草稿及待核对发送。',true);
