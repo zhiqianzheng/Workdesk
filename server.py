@@ -24,7 +24,7 @@ def runtime_dir(port=PORT):
 
 
 class Service:
-    def __init__(self, ai_path=None):
+    def __init__(self, ai_path=None, native_settings=None):
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.Lock()
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='workdesk-uia')
@@ -35,10 +35,21 @@ class Service:
         self.manual_until = 0
         self.history_binding = None
         self.search_active = False
-        from ai_reply import AutoReply
-        self.ai = AutoReply(self, ai_path)
+        self.native = bool(native_settings)
+        if self.native:
+            from native_backend import NativeConnection, NativeAI
+            self.bridge = NativeConnection(native_settings)
+            self.ai = NativeAI(native_settings, ai_path)
+        else:
+            from ai_reply import AutoReply
+            self.ai = AutoReply(self, ai_path)
 
     def call(self, method, *args):
+        if self.native:
+            try:
+                return getattr(self.bridge, method)(*args)
+            except Exception:
+                return {'error': '原生接口操作失败，请稍后重试；未操作桌面窗口。', 'state': 'rejected'}
         automatic_action = method in ('ai_observe', 'ai_deliver')
         try:
             if automatic_action:
@@ -302,7 +313,9 @@ def main():
     args = parser.parse_args()
     runtime = runtime_dir(args.port)
     runtime.mkdir(parents=True, exist_ok=True)
-    service = Service(Path(os.environ['LOCALAPPDATA']) / 'Workdesk' / 'ai-settings.json')
+    native_path = runtime / 'native-backend.json'
+    native_settings = json.loads(native_path.read_text(encoding='utf-8')) if native_path.exists() else None
+    service = Service(Path(os.environ['LOCALAPPDATA']) / 'Workdesk' / 'ai-settings.json', native_settings)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     except OSError:
