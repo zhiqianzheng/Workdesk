@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN" data-tools-collapsed="true">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>项目资料 · Workdesk</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>项目资料 · Workdesk</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script><script defer src="/ai.js"></script></head>
 <body>
 <div class="terminal-titlebar" aria-hidden="true"><div class="terminal-title-tab"><span class="terminal-title-icon">&gt;_</span><span class="terminal-title-path">C:\Windows\system32\cmd.exe</span><span class="terminal-title-close">×</span></div><span class="terminal-title-add">+</span><span class="terminal-title-menu">⌄</span><div class="terminal-window-controls"><span>−</span><span>▢</span><span>×</span></div></div>
 <div id="workspace">
@@ -15,7 +15,7 @@
     <div class="sidebar-bottom"><span class="dot" id="connectionDot"></span><span id="connectionLabel">正在检查连接</span><button id="settingsButton" aria-label="打开设置">⚙</button></div>
   </aside>
   <main>
-    <div class="tools-toggle-bar"><button type="button" id="toolsToggle" aria-expanded="false" aria-controls="workspaceHeader readingControls recordHeading recordMeta recordToolbar historyTools">展开工具</button></div>
+    <div class="tools-toggle-bar"><button type="button" id="aiOpen" title="AI 自动回复设置">AI · Off</button><button type="button" id="aiPause" hidden>Pause AI</button><button type="button" id="toolsToggle" aria-expanded="false" aria-controls="workspaceHeader readingControls recordHeading recordMeta recordToolbar historyTools">展开工具</button></div>
     <header id="workspaceHeader"><div class="breadcrumb"><button type="button" id="sidebarToggle" aria-controls="sidebar" aria-expanded="true" title="收起左侧目录">收起目录</button>个人空间 <span>/</span> <b id="breadcrumb">项目资料</b></div><div class="header-actions"><div class="appearance-switch" role="group" aria-label="切换显示风格"><button type="button" data-appearance="workdesk" aria-pressed="true" title="项目工作台风格">工作台</button><button type="button" data-appearance="document" aria-pressed="false" title="WPS 式文档风格">文档</button><button type="button" data-appearance="code" aria-pressed="false" title="VS Code 式代码风格">代码</button><button type="button" data-appearance="terminal" aria-pressed="false" title="终端风格">终端</button></div><span class="local-badge">仅本机</span><button id="privacyButton" title="当前网页内 Ctrl+Shift+Space">切换笔记 <kbd>Esc</kbd></button></div></header>
     <div class="document-chrome" aria-hidden="true"><div class="document-menu"><strong>文字</strong><span class="menu-current">开始</span><span>插入</span><span>页面布局</span><span>引用</span><span>审阅</span><span>视图</span></div><div class="document-ribbon"><span class="font-sample">正文 · 等线 <i>五号</i></span><span class="type-sample"><b>B</b> <i>I</i> <u>U</u></span><span>段落　 ≡　 ☷</span><span class="style-sample">Aa <small>正文</small></span><span class="style-sample">标题 <small>标题 1</small></span><span class="ribbon-caption">文档阅读视图</span></div><div class="document-ruler">1　　2　　3　　4　　5　　6　　7　　8　　9　　10　　11　　12　　13　　14　　15</div></div>
     <div class="code-chrome" aria-hidden="true"><div class="code-menu">文件　 编辑　 选择　 查看　 转到　 运行　 终端　 帮助 <span>项目工作区</span></div><div class="code-tab"><span>Ｍ　 workspace.md</span><span>notes.md</span><small>工作区 / records / 当前记录</small></div></div>
@@ -51,8 +51,26 @@
   </main>
 </div>
 <div class="appearance-status" aria-hidden="true"><span id="appearanceStatusLeft"></span><span id="appearanceStatusRight"></span></div>
-<dialog id="settings"><form method="dialog"><div class="dialog-title"><h2>工作台设置</h2><button aria-label="关闭设置">×</button></div><p>本地连接与使用说明</p><dl><dt>连接方式</dt><dd>优先使用本机文字控件；不可用时自动使用 Windows OCR。接收的文字和预览只在内存中处理，不上传到其他服务。发送图片时临时使用剪贴板，完成后恢复原内容；期间若你复制了新内容，会保留新内容。粘贴时可能短暂切换到微信，不再打开文件选择窗口。</dd><dt>记录范围</dt><dd>文字控件可用时支持联系人搜索和会话切换；图片显示当前窗口预览。OCR 降级模式仅有可见文字，不是完整历史备份。</dd><dt>文字提交</dt><dd>“提交记录”会真实发送。发送时会先清空当前聊天的原窗口草稿；对象变化或接口不可用时停止。状态未知时请先到原窗口核对。</dd><dt>切换笔记</dt><dd>Esc 或 Ctrl+Shift+Space，仅在此网页获得焦点时生效。不会隐藏微信自身窗口、通知或任务栏。</dd><dt>兼容性</dt><dd>OCR 需要原窗口保持打开且未最小化，可以被工作台覆盖。发送时短暂激活原窗口；目前支持每条 200 字以内的单行文字，校对失败会保留草稿。</dd></dl><div class="settings-actions"><button type="button" id="settingsReconnect">重新连接</button><button type="button" id="settingsDemo">界面预览</button><button type="button" id="checkSend" disabled>检查上次发送</button><button type="button" id="resolveSend" disabled>已在原窗口核对，解除锁定</button><button type="button" id="stopButton">停止本地服务</button></div></form></dialog>
+<dialog id="settings"><form method="dialog"><div class="dialog-title"><h2>工作台设置</h2><button aria-label="关闭设置">×</button></div><p>本地连接与使用说明</p><dl><dt>连接方式</dt><dd>优先使用本机文字控件；不可用时自动使用 Windows OCR。常规聊天的文字和预览只在内存中处理。启用 AI 自动回复后，选中会话的部分文字会发送至你配置的 AI 接口。发送图片时临时使用剪贴板，完成后恢复原内容；期间若你复制了新内容，会保留新内容。粘贴时可能短暂切换到微信，不再打开文件选择窗口。</dd><dt>记录范围</dt><dd>文字控件可用时支持联系人搜索和会话切换；图片显示当前窗口预览。OCR 降级模式仅有可见文字，不是完整历史备份。</dd><dt>文字提交</dt><dd>“提交记录”会真实发送。发送时会先清空当前聊天的原窗口草稿；对象变化或接口不可用时停止。状态未知时请先到原窗口核对。</dd><dt>切换笔记</dt><dd>Esc 或 Ctrl+Shift+Space，仅在此网页获得焦点时生效。不会隐藏微信自身窗口、通知或任务栏。</dd><dt>兼容性</dt><dd>OCR 需要原窗口保持打开且未最小化，可以被工作台覆盖。发送时短暂激活原窗口；目前支持每条 200 字以内的单行文字，校对失败会保留草稿。</dd></dl><div class="settings-actions"><button type="button" id="settingsReconnect">重新连接</button><button type="button" id="settingsDemo">界面预览</button><button type="button" id="checkSend" disabled>检查上次发送</button><button type="button" id="resolveSend" disabled>已在原窗口核对，解除锁定</button><button type="button" id="stopButton">停止本地服务</button></div></form></dialog>
 <dialog id="rename"><form id="renameForm"><div class="dialog-title"><h2>项目别名</h2><button type="button" id="cancelRename" aria-label="取消">×</button></div><p>只改变工作台显示，不修改微信备注。</p><label for="aliasInput">项目名称</label><input id="aliasInput" maxlength="40" required autocomplete="off"><button class="primary" type="submit">保存别名</button></form></dialog>
 <dialog id="imageViewer"><div class="dialog-title"><h2>图片预览</h2><button id="closeImage" aria-label="关闭图片">×</button></div><img id="largeImage" alt="当前窗口图片预览"><p>来自当前窗口的预览；原图请在微信中打开。</p></dialog>
 <dialog id="readingDetails"><div class="dialog-title"><h2>记录详情</h2><button id="closeDetails" aria-label="关闭记录详情">×</button></div><p>按读取顺序显示原文，保留消息边界与时间文字。图片请从正文附件入口查看。</p><ol id="detailRows"></ol></dialog>
+<dialog id="aiSettings" aria-labelledby="aiTitle">
+<div class="dialog-title"><h2 id="aiTitle">AI 自动回复</h2><button type="button" id="aiClose" aria-label="关闭 AI 设置">×</button></div>
+<p id="aiStatus" role="status">已关闭</p>
+<p class="ai-notice">默认关闭，每次重启需手动启用。仅处理选中会话的新文字；启用时已有消息不回复。会依次切换微信会话读取，手动切换、发送或输入会暂停接管。</p>
+<label>API 地址（兼容 Chat Completions）<input id="aiEndpoint" type="url" placeholder="https://你的服务地址/v1" maxlength="1000" autocomplete="off"></label>
+<label>模型名称<input id="aiModel" placeholder="填写服务商提供的模型 ID" maxlength="120" autocomplete="off"></label>
+<label>API 密钥<input id="aiKey" type="password" autocomplete="new-password" placeholder="本机加密保存；留空保留已保存密钥" maxlength="4096"></label>
+<label class="ai-check"><input id="aiClearKey" type="checkbox">清除已保存的密钥（无密钥本地模型）</label>
+<label>回复风格<textarea id="aiStyle" rows="3" maxlength="2000"></textarea></label>
+<label>同一联系人最短回复间隔（秒）<input id="aiInterval" type="number" min="10" max="600" value="30"></label>
+<div class="ai-contact-heading"><strong>接管的联系人</strong><button type="button" id="aiAddCurrent">加入当前联系人</button></div>
+<p class="ai-notice">从最近会话中勾选，最多20个。未出现的联系人请先在工作台搜索并打开，再回来添加。名称须唯一；联系人改名后需重新选择。</p>
+<div id="aiContacts" class="ai-contacts"></div>
+<p class="ai-notice">启用后，最近最多12条可识别的文字会传给上述接口（每条最多1500字），可能产生 API 费用。图片、语音和方向无法确认的消息不自动回复；目前方向识别适配微信默认浅色气泡。密钥由 Windows 当前用户加密保存，不会返回网页或写入日志。</p>
+<label class="ai-check"><input id="aiConsent" type="checkbox">允许将所选会话的文字发送到此 API，并将生成的回复自动发给这些联系人。</label>
+<div class="ai-actions"><button type="button" id="aiSave">保存配置（保持关闭）</button><button type="button" id="aiStart" class="primary">保存并启用</button><button type="button" id="aiPauseDialog">一键暂停</button></div>
+<p class="ai-notice">一键暂停会取消尚未发出的回复；已经点击发送的消息无法撤回。发送结果未知时暂停，不自动补发。每小时最多60条。请保持微信打开、未最小化；不要在接管时同时操作原微信。</p>
+</dialog>
 </body></html>

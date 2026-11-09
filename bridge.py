@@ -470,7 +470,7 @@ class Bridge:
         from media import ImageSender
         return ImageSender(self).send(binding, encoded)
 
-    def click_send(self, binding, expected_draft):
+    def click_send(self, binding, expected_draft, guard=None):
         # Qt's InvokePattern can return successfully without activating this button.
         # Use the same window-bound click route as session selection and file picking.
         layout = self._layout()
@@ -481,7 +481,11 @@ class Bridge:
             raise BridgeError('发送前草稿已变化，没有点击发送。')
         if not layout['send'] or not layout['send'].IsEnabled:
             raise BridgeError('微信发送按钮尚不可用，没有点击发送。')
-        self._click_item(layout, layout['send'])
+        if guard:
+            with guard():
+                self._click_item(layout, layout['send'])
+        else:
+            self._click_item(layout, layout['send'])
 
     def _wait_draft(self, binding, expected, *, require_send=False):
         # SetValue returns before Qt necessarily publishes the new accessible value.
@@ -519,7 +523,7 @@ class Bridge:
             layout, value = self._wait_draft(binding, '')
         return layout, value
 
-    def send(self, binding, text):
+    def send(self, binding, text, *, guard=None, preserve_draft=False):
         layout = self._layout()
         if layout.get('blocked'):
             raise BridgeError('原窗口有未处理的对话框，已停止发送。')
@@ -531,11 +535,21 @@ class Bridge:
         if not value or value.IsReadOnly or not layout['send']:
             raise BridgeError('当前版本未提供可靠的后台输入或发送接口。请使用原窗口。')
         if value.Value:
+            if preserve_draft:
+                return {'state': 'stale'}
             layout, value = self.clear_draft(binding)
         before = {r['id'] for r in self._records(layout)}
         # Before the click, failure is known not to have sent anything. Keep the draft.
         try:
-            value.SetValue(text, waitTime=0)
+            if guard:
+                with guard():
+                    latest = self._layout()
+                    value = self._pattern(latest['editor'], 'ValuePattern')
+                    if latest['binding'] != binding or not value or value.IsReadOnly or value.Value:
+                        return {'state': 'stale'}
+                    value.SetValue(text, waitTime=0)
+            else:
+                value.SetValue(text, waitTime=0)
             refreshed, value = self._wait_draft(binding, text, require_send=True)
         except BridgeError as error:
             return {'state': 'not_sent', 'detail': str(error)}
@@ -543,7 +557,10 @@ class Bridge:
             return {'state': 'not_sent', 'detail': '输入框读取中断，未点击发送。草稿已保留，请重新同步后重试。'}
         # A click may have been dispatched even if its call raises. Never retry it.
         try:
-            self.click_send(binding, text)
+            if guard:
+                self.click_send(binding, text, guard=guard)
+            else:
+                self.click_send(binding, text)
             for _ in range(5):
                 time.sleep(0.2)
                 refreshed = self._layout()

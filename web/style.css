@@ -386,3 +386,16 @@
 [data-appearance="terminal"] #notesPage{overflow:auto;flex:1;width:100%}
 [data-appearance="terminal"] .setup{overflow:auto;flex:1;min-height:90px}
 @media(max-width:720px){[data-appearance="terminal"] #recordPage{padding-left:12px;padding-right:12px}[data-appearance="terminal"] #terminalExtras{padding:4px 12px 8px;flex-wrap:wrap}[data-appearance="terminal"] #commandPrompt{font-size:11px}[data-appearance="terminal"] #composerArea{column-gap:5px}}
+
+/* AI controls remain reachable when the surrounding workspace tools are collapsed. */
+.tools-toggle-bar{gap:8px}
+#aiSettings{width:min(720px,92vw);max-height:88vh;overflow-y:auto;padding:24px;color:var(--ink)}
+#aiSettings>label{display:block;margin:12px 0;font-size:13px}
+#aiSettings input:not([type=checkbox]),#aiSettings textarea{display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:9px;background:var(--paper);color:var(--ink);border:1px solid var(--border);font:inherit}
+#aiSettings .ai-check{display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.6}
+#aiSettings input[type=checkbox]{width:auto;flex-shrink:0;margin:4px 0}
+.ai-notice{font-size:12px;line-height:1.7;color:var(--muted)}
+.ai-contact-heading,.ai-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:15px}
+.ai-contacts{max-height:180px;overflow:auto;border:1px solid var(--border);padding:10px;margin-top:8px}
+.ai-contacts label{padding:5px 0;overflow-wrap:anywhere}
+#aiStatus{border-left:2px solid var(--muted);padding-left:10px;overflow-wrap:anywhere;font-size:13px}

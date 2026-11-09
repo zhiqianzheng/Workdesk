@@ -23,7 +23,7 @@ def runtime_dir(port=PORT):
 
 
 class Service:
-    def __init__(self):
+    def __init__(self, ai_path=None):
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.Lock()
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='workdesk-uia')
@@ -31,6 +31,8 @@ class Service:
         self.sends = {}
         self.read_future = None
         self.action_future = None
+        from ai_reply import AutoReply
+        self.ai = AutoReply(self, ai_path)
 
     def call(self, method, *args):
         try:
@@ -52,6 +54,7 @@ class Service:
             return self.read_future
 
     def action(self, method, *args):
+        self.ai.pause('你已手动操作工作台，自动回复已暂停。')
         with self.lock:
             if self.action_future is not None and not self.action_future.done():
                 raise ValueError('上一项操作仍在进行，请稍后检查结果。')
@@ -59,6 +62,7 @@ class Service:
             return self.action_future
 
     def send(self, request_id, binding, text, kind='text'):
+        self.ai.pause('你已手动发送，自动回复已暂停。')
         fingerprint = hashlib.sha256((kind + '\0' + binding + '\0' + text).encode()).hexdigest()
         with self.lock:
             if request_id in self.sends:
@@ -122,6 +126,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/api/health':
             self.respond(200, {'app': 'project-workdesk', 'version': 1})
             return
+        if self.path == '/api/ai/status':
+            self.respond(200, self.server.service.ai.public())
+            return
         if self.path == '/api/state':
             try:
                 self.respond(200, self.server.service.read().result(timeout=9))
@@ -135,7 +142,8 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, {'app': 'project-workdesk', 'version': 1})
             return
         files = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'),
-                 '/style.css': ('style.css', 'text/css; charset=utf-8'), '/icon.svg': ('icon.svg', 'image/svg+xml')}
+                 '/style.css': ('style.css', 'text/css; charset=utf-8'), '/icon.svg': ('icon.svg', 'image/svg+xml'),
+                 '/ai.js': ('ai.js', 'text/javascript; charset=utf-8')}
         if self.path not in files:
             self.respond(404, {'error': 'Not found'})
             return
@@ -157,6 +165,24 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError('请求格式无效。')
             service = self.server.service
+            if self.path.startswith('/api/ai/'):
+                from ai_reply import ReplyError
+                try:
+                    if self.path == '/api/ai/config':
+                        result = service.ai.save(data)
+                    elif self.path == '/api/ai/start':
+                        result = service.ai.start()
+                    elif self.path == '/api/ai/pause':
+                        result = service.ai.pause()
+                    else:
+                        self.respond(404, {'error': 'Not found'})
+                        return
+                    self.respond(200, result)
+                except ReplyError as error:
+                    self.respond(400, {'error': str(error)})
+                except OSError:
+                    self.respond(500, {'error': '本机配置无法保存，请检查文件权限。'})
+                return
             if self.path in ('/api/send', '/api/send-image'):
                 request_id, binding, text = (data.get(k) for k in ('requestId', 'binding', 'text'))
                 if not isinstance(request_id, str) or not 16 <= len(request_id) <= 80:
@@ -196,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/api/native':
                 future = service.action('open_native')
             elif self.path == '/api/stop':
+                service.ai.close()
                 self.respond(200, {'ok': True})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
@@ -218,7 +245,7 @@ def main():
     args = parser.parse_args()
     runtime = runtime_dir(args.port)
     runtime.mkdir(parents=True, exist_ok=True)
-    service = Service()
+    service = Service(Path(os.environ['LOCALAPPDATA']) / 'Workdesk' / 'ai-settings.json')
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     except OSError:
@@ -235,6 +262,7 @@ def main():
     try:
         server.serve_forever(poll_interval=0.25)
     finally:
+        service.ai.close()
         server.server_close()
         if service.bridge and hasattr(service.bridge, 'close'):
             service.worker.submit(service.bridge.close).result(timeout=8)
