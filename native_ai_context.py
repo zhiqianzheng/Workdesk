@@ -32,7 +32,8 @@ def context_for(rows, received, root, base, request, video_enabled=False,voice_e
     included = targets | historical
     candidates = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
                   and row.get('createdAt', '') <= latest
-                  and (row.get('type') == 1 or row.get('id') in included)][-12:]
+                  and (row.get('type') == 1 or row.get('id') in included
+                       or (row.get('direction') == 'outgoing' and row.get('type') == 3))][-12:]
     selected = {row['id'] for row in candidates if row.get('id') in included}
     if targets - selected or len(selected) > 4:
         raise ValueError('Too many incoming images in one reply; no image silently omitted')
@@ -65,6 +66,8 @@ def context_for(rows, received, root, base, request, video_enabled=False,voice_e
                                'text': '附件：' + name + '\n' + document_text(name, raw)})
             elif row.get('id') in selected:
                 result.append({'kind': 'image', 'direction': 'incoming', 'image': previews.fetch(row['id'])})
+            elif row.get('direction') == 'outgoing' and row.get('type') == 3:
+                result.append({'kind':'text','direction':'outgoing','text':'[此前已发送一张图片或表情图片，内容未重新读取；不要臆测具体画面，也不要机械重复发图。]'})
             elif row.get('body'):
                 result.append({'kind': 'text', 'direction': row['direction'], 'text': row['body']})
         return result

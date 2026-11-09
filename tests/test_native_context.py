@@ -29,3 +29,15 @@ class ContextTests(unittest.TestCase):
         with patch('native_ai_context.Previews',return_value=preview):
             with self.assertRaises(ValueError):context_for(rows,[rows[-1]],None,None,None)
         preview.close.assert_called_once()
+
+    def test_sent_images_are_visible_as_history_without_downloading_or_exposing_xml(self):
+        sent=self.row('1',3,'outgoing');sent['body']='<private-media-metadata/>'
+        rows=[sent,self.row('2'),self.row('3',3,'outgoing')]
+        preview=Mock()
+        with patch('native_ai_context.Previews',return_value=preview):
+            result=context_for(rows,[rows[1]],None,None,None)
+        self.assertEqual(len(result),2)
+        self.assertEqual(result[0]['direction'],'outgoing')
+        self.assertEqual(result[0]['kind'],'text')
+        self.assertNotIn('private-media-metadata',result[0]['text'])
+        preview.fetch.assert_not_called()

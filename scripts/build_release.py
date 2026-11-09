@@ -11,7 +11,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist'
-VERSION = '1.1.0-preview.7'
+VERSION = '1.1.0-preview.8'
 HASHES = {'windows': '01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c',
           'linux': '0b59f03ace18358d0606df1eb15e0495016aabe07208da8c45dc785b70de93b3'}
 

@@ -172,7 +172,8 @@ def main(root):
                                     task=state['task'];state['replies']+=1
                                     state['history']=(state['history']+[
                                         {'kind':'text','direction':'incoming','text':task.get('requestSummary','')},
-                                        {'kind':'text','direction':'outgoing','text':task['text'][len(PREFIX):].strip()}])[-12:]
+                                        {'kind':'text','direction':'outgoing','text':task['text'][len(PREFIX):].strip()+
+                                         ('\n[本轮已实际发送一张图片或表情图片。]' if task.get('images') else '')}])[-12:]
                                 elif result['state']=='uncertain':state['blocked']=result.get('detail','发送结果未知，请核对。')
                                 state['task']=None
                             atomic(path,state)
