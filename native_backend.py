@@ -13,6 +13,7 @@ import urllib.request
 import urllib.error
 import uuid
 from native_process import command
+from native_files import is_file
 
 
 def key(value):
@@ -84,7 +85,7 @@ class NativeConnection:
             who = '我' if row.get('direction') == 'outgoing' else (row.get('senderName') or row.get('senderId') or '对方')
             stamp = row.get('createdAt', '').replace('T', ' ')
             records.append({'id': row['id'], 'text': f'{who} · {stamp}\n{body}',
-                            'direction': row.get('direction'), 'kind': 'image' if row.get('type') == 3 else 'text'})
+                            'direction': row.get('direction'), 'kind': 'file' if is_file(row) else 'image' if row.get('type') == 3 else 'text'})
         self.rows = records + self.rows if cursor else records
 
     def snapshot(self):
@@ -171,6 +172,21 @@ class NativeConnection:
     def send_image(self, binding, encoded):
         from native_images import send_image
         return send_image(self, binding, encoded)
+
+    def send_file(self, binding, payload):
+        from native_files import send_file
+        return send_file(self, binding, payload)
+
+    def download_file(self, binding, message):
+        import base64
+        from native_files import fetch_file
+        if not self.selected or key(self.selected) != binding:
+            return {'state': 'not_sent', 'detail': '会话已变化。'}
+        try:
+            name, raw = fetch_file(self, message, self.selected)
+            return {'state': 'observed', 'name': name, 'data': base64.b64encode(raw).decode('ascii')}
+        except Exception:
+            return {'state': 'not_sent', 'detail': '文件暂不可下载、超过 8 MB 或校验失败。'}
 
     def close(self):
         self.previews.close()

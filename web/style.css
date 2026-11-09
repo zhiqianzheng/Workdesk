@@ -406,3 +406,5 @@
 #aiSettings.native-ai > label, #aiSettings.native-ai .ai-contact-heading,
 #aiSettings.native-ai .ai-contacts, #aiSettings.native-ai .ai-notice,
 #aiSettings.native-ai #aiSave { display: none; }
+
+.file-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0}.file-tools button{font-size:11px;padding:3px 8px}.file-tools span{font-size:11px;overflow-wrap:anywhere}

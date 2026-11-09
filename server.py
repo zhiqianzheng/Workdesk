@@ -144,7 +144,7 @@ class Service:
             if self.action_future is not None and not self.action_future.done():
                 raise ValueError('上一项操作仍在进行，请先检查结果。')
             self.manual_until = time.monotonic() + (1 if self.ai.config.get('allContacts') else 5)
-            future = self.worker.submit(self.call, 'send_image' if kind == 'image' else 'send', binding, text)
+            future = self.worker.submit(self.call, {'image': 'send_image', 'file': 'send_file', 'download': 'download_file'}.get(kind, 'send'), binding, text)
             self.action_future = future
             self.sends[request_id] = fingerprint, future
             return future
@@ -228,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get('Content-Length', '0'))
-            maximum = 12 * 1024 * 1024 if self.path == '/api/send-image' else 65536
+            maximum = 12 * 1024 * 1024 if self.path in ('/api/send-image', '/api/send-file') else 65536
             if length <= 0 or length > maximum:
                 raise ValueError('请求长度无效。')
             data = json.loads(self.rfile.read(length))
@@ -253,13 +253,24 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     self.respond(500, {'error': '本机配置无法保存，请检查文件权限。'})
                 return
-            if self.path in ('/api/send', '/api/send-image'):
+            if self.path in ('/api/send', '/api/send-image', '/api/send-file', '/api/download-file'):
                 request_id, binding, text = (data.get(k) for k in ('requestId', 'binding', 'text'))
                 if not isinstance(request_id, str) or not 16 <= len(request_id) <= 80:
                     raise ValueError('请求编号无效。')
                 if not isinstance(binding, str) or len(binding) != 24:
                     raise ValueError('请先连接并核对当前对象。')
-                if self.path == '/api/send-image':
+                if self.path in ('/api/send-file', '/api/download-file'):
+                    if not service.native:
+                        raise ValueError('文件功能仅支持原生后台模式。')
+                    if self.path == '/api/send-file':
+                        if not isinstance(data.get('name'), str) or len(data['name']) > 255 or not isinstance(data.get('data'), str) or len(data['data']) > 11184820:
+                            raise ValueError('文件无效或超过 8 MB。')
+                        future = service.send(request_id, binding, json.dumps({'name': data['name'], 'data': data['data']}), kind='file')
+                    else:
+                        if not isinstance(data.get('message'), str) or not 1 <= len(data['message']) <= 200:
+                            raise ValueError('消息编号无效。')
+                        future = service.send(request_id, binding, data['message'], kind='download')
+                elif self.path == '/api/send-image':
                     encoded = data.get('image')
                     if not isinstance(encoded, str) or not encoded or len(encoded) > 11184820:
                         raise ValueError('图片内容无效。')

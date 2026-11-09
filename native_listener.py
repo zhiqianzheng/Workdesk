@@ -14,6 +14,7 @@ import urllib.request
 
 from ai_reply import generate, protect, AutoReply
 from native_backend import NativeAI, NativeConnection
+from native_ai_context import context_for, replyable
 
 
 def initialize(root):
@@ -84,9 +85,7 @@ def work(thread, messages, since=0):
             return {'state': 'skipped'}
         rows = request('threads/' + quote(thread) + '/messages?limit=20')['items']
         targets = set(messages)
-        received = [row for row in rows if row.get('id') in targets and
-                    row.get('direction') == 'incoming' and row.get('type') == 1
-                    and row.get('body', '').strip()]
+        received = [row for row in rows if row.get('id') in targets and replyable(row)]
         # A newly received event may precede local projection. Retry instead of
         # silently losing its message identifier.
         missing = targets - {row.get('id') for row in rows}
@@ -94,7 +93,7 @@ def work(thread, messages, since=0):
             row = request('messages/' + quote(message))
             if row.get('threadId') != thread:
                 raise ValueError('Message thread mismatch')
-            if row.get('direction') == 'incoming' and row.get('type') == 1 and row.get('body', '').strip():
+            if replyable(row):
                 received.append(row)
                 rows.append(row)
         if not received:
@@ -104,12 +103,7 @@ def work(thread, messages, since=0):
                         datetime.fromisoformat(row['createdAt'].replace('Z', '+00:00')).timestamp() >= since]
             if not received:
                 return {'state': 'skipped_old_history'}
-        latest = max(row.get('createdAt', '') for row in received)
-        rows = sorted(rows, key=lambda row: (row.get('createdAt', ''), str(row.get('serverId', ''))))
-        context = [{'kind': 'text', 'direction': row['direction'], 'text': row['body']}
-                   for row in rows if row.get('type') == 1 and row.get('body')
-                   and row.get('direction') in ('incoming', 'outgoing')
-                   and row.get('createdAt', '') <= latest][-12:]
+        context = context_for(rows, received, ROOT, BASE, request)
         config = dict(CONFIG)
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()
