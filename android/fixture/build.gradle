@@ -1,0 +1,5 @@
+plugins { id 'com.android.application' }
+android { namespace 'com.workdesk.fixture'; compileSdk 35
+ defaultConfig { applicationId 'com.tencent.mm'; minSdk 28; targetSdk 35; versionCode 1; versionName 'TEST-ONLY' }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+}

@@ -1,0 +1,16 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'com.workdesk.android'
+ compileSdk 35
+ defaultConfig {
+  applicationId 'com.workdesk.android'
+  minSdk 28
+  targetSdk 35
+  versionCode 1
+  versionName '0.1.0-preview.1'
+  testInstrumentationRunner 'com.workdesk.android.Acceptance'
+ }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+ buildTypes { release { minifyEnabled false } }
+ lint { abortOnError true }
+}

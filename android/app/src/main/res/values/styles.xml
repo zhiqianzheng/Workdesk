@@ -1,0 +1,9 @@
+<resources>
+ <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+  <item name="android:fontFamily">sans</item><item name="android:colorAccent">#087F72</item>
+  <item name="android:windowLightStatusBar">false</item><item name="android:statusBarColor">#15383C</item>
+  <item name="android:navigationBarColor">#15383C</item><item name="android:windowActionModeOverlay">true</item>
+  <item name="android:windowBackground">#F0F5F4</item>
+ </style>
+ <string name="assist_description">仅当你在 Workdesk 开启前台辅助发送时：打开收到新消息的微信会话，核对会话标题和原消息，填写并点击发送文字。需要手机解锁，会切换到微信；不读取其他应用、不绕过锁屏。可随时在 Workdesk 暂停或关闭此服务。</string>
+</resources>
