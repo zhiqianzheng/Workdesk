@@ -197,11 +197,12 @@ class Bridge:
 
     def _snapshot_from_layout(self, layout, *, include_images=True, records=None):
         sessions = self._sessions(layout)
+        can_go_back = len(self._back_controls(layout)) == 1 and not layout['blocked']
         if not layout.get('chatAvailable', True):
             detail = '当前是公众号或其他功能页面。可在左侧选择好友或群聊继续使用，无需重启服务。'
             can_search = any(n.ControlTypeName == 'EditControl' and n.Name in ('搜索', 'Search') for n in layout['nodes'])
             return {'connected': True, 'mode': 'uia', 'view': 'navigation',
-                    'canSearch': can_search and not layout['blocked'], 'canHistory': False,
+                    'canSearch': can_search and not layout['blocked'], 'canHistory': False, 'canGoBack': can_go_back,
                     'detail': detail, 'sendNote': '此页面没有聊天输入框，请从左侧选择好友或群聊。',
                     'current': {'name': layout['name'], 'key': digest(layout['name']), 'binding': layout['binding']},
                     'records': [], 'sessions': [{k:v for k,v in item.items() if k != 'control'} for item in sessions],
@@ -209,7 +210,7 @@ class Bridge:
         value = self._pattern(layout['editor'], 'ValuePattern')
         duplicates = sum(s['name'] == layout['name'] for s in sessions) > 1
         can_send = bool(value and not value.IsReadOnly and layout['send'] and not duplicates and not layout['blocked'])
-        return {'connected': True, 'mode': 'uia', 'canSearch': True, 'canHistory': not layout['blocked'],
+        return {'connected': True, 'mode': 'uia', 'canSearch': True, 'canHistory': not layout['blocked'], 'canGoBack': can_go_back,
                 'detail': '当前窗口记录已读取；可搜索联系人并切换会话。',
                 'current': {'name': layout['name'], 'key': digest(layout['name']), 'binding': layout['binding']},
                 'records': self._media_records(layout) if include_images else self._history_records(layout, records),
@@ -218,6 +219,32 @@ class Bridge:
                 'canSendImage': can_send,
                 'sendNote': '' if can_send else '当前控件不支持可靠的后台发送，或会话名称重复。请使用“打开原窗口”。',
                 'hasNativeDraft': bool(value and value.Value)}
+
+    def _back_controls(self, layout):
+        return [n for n in layout.get('nodes', []) if n.ClassName == 'mmui::ChatBackwardView'
+                and n.Name == '返回' and not getattr(n, 'IsOffscreen', False)]
+
+    def navigate_back(self):
+        layout = self._navigation_layout()
+        if layout['blocked']:
+            raise BridgeError('原窗口有未处理的对话框，请先关闭后返回。')
+        controls = self._back_controls(layout)
+        if len(controls) > 1:
+            raise BridgeError('未找到唯一的返回入口，请在原窗口确认。')
+        if not controls:
+            return self._snapshot_from_layout(layout, include_images=False)
+        self._click_item(layout, controls[0])
+        self.search_query = ''
+        self.search_results = {}
+        for _ in range(12):
+            time.sleep(.1)
+            try:
+                current = self._layout()
+                if not current['blocked'] and not self._back_controls(current):
+                    return self._snapshot_from_layout(current, include_images=False)
+            except BridgeError:
+                continue
+        raise BridgeError('尚未确认返回完成，请稍后刷新目录。')
 
     def select(self, session_id):
         layout = self._navigation_layout()
@@ -240,7 +267,8 @@ class Bridge:
             time.sleep(.15)
             try:
                 candidate = self._layout()
-                if contact_name(candidate['name']) == selected['name']:
+                if (contact_name(candidate['name']) == selected['name'] or
+                        selected['name'] == '服务号' and self._back_controls(candidate)):
                     updated = candidate
                     break
             except BridgeError:
@@ -266,6 +294,8 @@ class Bridge:
         raise BridgeError('微信正在恢复界面，请稍候重新选择会话。')
 
     def _restore_minimized(self, hwnd):
+        if getattr(self, 'automatic_input_guard', None):
+            self.automatic_input_guard()
         user = ctypes.WinDLL('user32', use_last_error=True)
         user.IsIconic.argtypes = [wintypes.HWND]
         if not user.IsIconic(hwnd):
@@ -314,6 +344,8 @@ class Bridge:
         return result
 
     def _pointer_item(self, layout, control, wheel_delta=None):
+        if getattr(self, 'automatic_input_guard', None):
+            self.automatic_input_guard()
         # Qt exposes SelectionItemPattern but its Select() can return EVENT_E_ALL_SUBSCRIBERS_FAILED.
         # Route a single click to the item's own HWND, without moving the user's cursor.
         user = ctypes.WinDLL('user32', use_last_error=True)
@@ -345,6 +377,8 @@ class Bridge:
                 raise BridgeError('目标控件不可见。')
             point = wintypes.POINT((rect.left+rect.right)//2, (rect.top+rect.bottom)//2)
             user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            if getattr(self, 'automatic_input_guard', None):
+                self.automatic_input_guard()
             if wheel_delta is not None:
                 # WM_MOUSEWHEEL uses screen coordinates, unlike mouse button messages.
                 position = (point.y & 0xffff) << 16 | (point.x & 0xffff)
@@ -470,7 +504,7 @@ class Bridge:
         from media import ImageSender
         return ImageSender(self).send(binding, encoded)
 
-    def click_send(self, binding, expected_draft, guard=None):
+    def click_send(self, binding, expected_draft, guard=None, on_dispatch=None):
         # Qt's InvokePattern can return successfully without activating this button.
         # Use the same window-bound click route as session selection and file picking.
         layout = self._layout()
@@ -483,8 +517,12 @@ class Bridge:
             raise BridgeError('微信发送按钮尚不可用，没有点击发送。')
         if guard:
             with guard():
+                if on_dispatch:
+                    on_dispatch()
                 self._click_item(layout, layout['send'])
         else:
+            if on_dispatch:
+                on_dispatch()
             self._click_item(layout, layout['send'])
 
     def _wait_draft(self, binding, expected, *, require_send=False):
@@ -508,7 +546,7 @@ class Bridge:
             raise BridgeError('微信输入框未及时显示完整文字，未点击发送。草稿已保留，可稍后重试。')
         raise BridgeError('微信发送按钮尚未就绪，未点击发送。草稿已保留，可稍后重试。')
 
-    def clear_draft(self, binding):
+    def clear_draft(self, binding, expected=None):
         # User preference: replace this conversation's native draft on an explicit send.
         layout = self._layout()
         if layout['binding'] != binding or layout.get('blocked'):
@@ -518,12 +556,14 @@ class Bridge:
         value = self._pattern(layout['editor'], 'ValuePattern')
         if not value or value.IsReadOnly:
             raise BridgeError('无法操作当前输入框，没有清空草稿。')
+        if expected is not None and value.Value != expected:
+            raise BridgeError('草稿已变化，没有清空草稿。')
         if value.Value:
             value.SetValue('', waitTime=0)
             layout, value = self._wait_draft(binding, '')
         return layout, value
 
-    def send(self, binding, text, *, guard=None, preserve_draft=False):
+    def send(self, binding, text, *, guard=None, preserve_draft=False, on_draft_written=None):
         layout = self._layout()
         if layout.get('blocked'):
             raise BridgeError('原窗口有未处理的对话框，已停止发送。')
@@ -547,6 +587,8 @@ class Bridge:
                     value = self._pattern(latest['editor'], 'ValuePattern')
                     if latest['binding'] != binding or not value or value.IsReadOnly or value.Value:
                         return {'state': 'stale'}
+                    if on_draft_written:
+                        on_draft_written(binding, text)
                     value.SetValue(text, waitTime=0)
             else:
                 value.SetValue(text, waitTime=0)
@@ -556,11 +598,15 @@ class Bridge:
         except Exception:
             return {'state': 'not_sent', 'detail': '输入框读取中断，未点击发送。草稿已保留，请重新同步后重试。'}
         # A click may have been dispatched even if its call raises. Never retry it.
+        dispatched = False
+        def mark_dispatched():
+            nonlocal dispatched
+            dispatched = True
         try:
             if guard:
-                self.click_send(binding, text, guard=guard)
+                self.click_send(binding, text, guard=guard, on_dispatch=mark_dispatched)
             else:
-                self.click_send(binding, text)
+                self.click_send(binding, text, on_dispatch=mark_dispatched)
             for _ in range(5):
                 time.sleep(0.2)
                 refreshed = self._layout()
@@ -573,6 +619,8 @@ class Bridge:
                 return {'state': 'unknown', 'detail': '发送请求未确认，文字仍留在微信输入框。请在原窗口处理这条草稿，工作台不会自动补发。'}
             return {'state': 'unknown', 'detail': '已请求点击一次发送，但未观察到新增消息。请核对原窗口，勿重复发送。'}
         except Exception:
+            if not dispatched:
+                return {'state': 'not_sent', 'detail': '发送前校验中断，尚未执行点击。'}
             return {'state': 'unknown', 'detail': '操作中断，文字可能已写入或发送。请到原窗口核对，未自动重试。'}
 
     def open_native(self):

@@ -10,6 +10,7 @@ import secrets
 import socket
 import sys
 import threading
+import time
 import webbrowser
 
 ROOT = Path(__file__).resolve().parent
@@ -31,21 +32,71 @@ class Service:
         self.sends = {}
         self.read_future = None
         self.action_future = None
+        self.manual_until = 0
+        self.history_binding = None
+        self.search_active = False
         from ai_reply import AutoReply
         self.ai = AutoReply(self, ai_path)
 
     def call(self, method, *args):
+        automatic_action = method in ('ai_observe', 'ai_deliver')
         try:
+            if automatic_action:
+                from connection import ai_interaction_ready
+                if not ai_interaction_ready():
+                    detail = '正在让出前台供你办公；仅检测消息，等待微信在前台且键鼠空闲后回复。'
+                    return ({'state': 'deferred', 'detail': detail} if method == 'ai_deliver'
+                            else {'available': False, 'detail': detail})
+                if self.bridge is not None:
+                    from connection import require_ai_interaction
+                    self.bridge.uia.automatic_input_guard = require_ai_interaction
+            if method in ('ai_scan', 'ai_observe', 'ai_deliver'):
+                with self.lock:
+                    automatic = self.ai.config.get('allContacts', False)
+                    waiting = ((not automatic and (self.history_binding or self.search_active))
+                               or time.monotonic() < self.manual_until)
+                    return_latest = automatic and self.history_binding and method != 'ai_scan'
+                if waiting:
+                    return ({'available': False, 'detail': '接管仍开启；正在让出窗口供你操作。查看历史后点“回到最新”继续。'}
+                            if method != 'ai_deliver' else {'state': 'deferred'})
+                if return_latest and self.bridge is not None:
+                    layout = self.bridge.uia._layout()
+                    if layout.get('messages'):
+                        self.bridge.uia.scroll_history(layout['binding'], 'latest')
+                        with self.lock:
+                            self.history_binding = None
             if self.bridge is None:
                 # Import and initialize COM exclusively on the same worker as all UIA calls.
                 from connection import Connection
                 self.bridge = Connection()
-            return getattr(self.bridge, method)(*args)
+            if automatic_action:
+                from connection import require_ai_interaction
+                self.bridge.uia.automatic_input_guard = require_ai_interaction
+            result = getattr(self.bridge, method)(*args)
+            if method in ('select', 'search', 'scroll_history', 'open_native', 'send', 'send_image', 'navigate_back'):
+                with self.lock:
+                    self.manual_until = time.monotonic() + (1 if self.ai.config.get('allContacts') else 5)
+                    if not result.get('error'):
+                        if method == 'search':
+                            self.search_active = bool(args[0])
+                        elif method == 'select':
+                            self.search_active = False
+                            if result.get('current', {}).get('binding') != self.history_binding:
+                                self.history_binding = None
+                        elif method == 'scroll_history':
+                            self.history_binding = args[0] if args[1] != 'latest' else None
+                        elif method == 'navigate_back':
+                            self.search_active = False
+                            self.history_binding = None
+            return result
         except Exception as error:
             from bridge import BridgeError
             if isinstance(error, BridgeError):
                 return {'error': str(error), 'state': 'rejected'}
             return {'error': '连接操作失败，请在原窗口检查后重新连接。'}
+        finally:
+            if automatic_action and self.bridge is not None:
+                self.bridge.uia.automatic_input_guard = None
 
     def read(self):
         with self.lock:
@@ -54,15 +105,18 @@ class Service:
             return self.read_future
 
     def action(self, method, *args):
-        self.ai.pause('你已手动操作工作台，自动回复已暂停。')
         with self.lock:
             if self.action_future is not None and not self.action_future.done():
                 raise ValueError('上一项操作仍在进行，请稍后检查结果。')
+            self.manual_until = time.monotonic() + (1 if self.ai.config.get('allContacts') else 5)
+            if method == 'scroll_history' and args[1] != 'latest':
+                self.history_binding = args[0]
+            elif method == 'search' and args[0]:
+                self.search_active = True
             self.action_future = self.worker.submit(self.call, method, *args)
             return self.action_future
 
     def send(self, request_id, binding, text, kind='text'):
-        self.ai.pause('你已手动发送，自动回复已暂停。')
         fingerprint = hashlib.sha256((kind + '\0' + binding + '\0' + text).encode()).hexdigest()
         with self.lock:
             if request_id in self.sends:
@@ -74,6 +128,7 @@ class Service:
                 raise ValueError('本次运行的发送记录已满，请重启工作台。')
             if self.action_future is not None and not self.action_future.done():
                 raise ValueError('上一项操作仍在进行，请先检查结果。')
+            self.manual_until = time.monotonic() + (1 if self.ai.config.get('allContacts') else 5)
             future = self.worker.submit(self.call, 'send_image' if kind == 'image' else 'send', binding, text)
             self.action_future = future
             self.sends[request_id] = fingerprint, future
@@ -210,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(binding, str) or len(binding) != 24 or direction not in ('older', 'newer', 'latest'):
                     raise ValueError('请先连接会话，再选择翻页方向。')
                 future = service.action('scroll_history', binding, direction)
+            elif self.path == '/api/back':
+                future = service.action('navigate_back')
             elif self.path == '/api/select':
                 if not isinstance(data.get('id'), str):
                     raise ValueError('请选择项目。')

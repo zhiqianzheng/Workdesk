@@ -1,15 +1,22 @@
 'use strict';
 (() => {
  const byId=id=>document.getElementById(id);
- let active=false, loading=false, pausedForInput=false, configLoading=false, formError='';
+ let active=false, loading=false, configLoading=false, formError='';
  let selected=new Set(), saved=null;
  const status=(message,error=false)=>{formError=error?message:'';byId('aiStatus').textContent=message;};
  const display=value=>{
   saved=value;active=!!value.enabled;
-  byId('aiOpen').textContent=active?'AI · On':'AI · Off';
+  const health=value.health?.state;
+  const waiting=active&&['waiting','stalled','starting'].includes(health);
+  byId('aiOpen').textContent=active?(waiting?'AI · Wait':'AI · On'):'AI · Off';
   byId('aiPause').hidden=!active;
   byId('aiPauseDialog').disabled=!active;
-  if(!formError)status(value.status||'已关闭');
+  const metrics=value.metrics||{};
+  const detail=active&&value.health ?
+   `${health==='stalled'?'检测超时，请检查服务':health==='waiting'?'等待窗口可读取':health==='starting'?'正在启动检测':'正在检测'} · 最近扫描 ${value.health.scanAgeSeconds??'—'} 秒前 · 已扫描 ${metrics.scans||0} 次 · 已观察到回复 ${metrics.replies||0} 条` : '';
+  const message=[value.status,detail,waiting?value.health?.detail:''].filter(Boolean).join('\n');
+  byId('aiOpen').title=message;
+  if(!formError)status(message||'已关闭');
  };
  const contacts=()=>{
   const names=[...new Set([...selected,...(state.sessions||[]).map(s=>s.name)])];
@@ -42,6 +49,7 @@
    byId('aiEndpoint').value=config.endpoint;byId('aiModel').value=config.model;
    byId('aiKey').value='';byId('aiKey').placeholder=config.hasKey?'密钥已保存；留空保留':'本机模型可留空';
    byId('aiStyle').value=config.style;byId('aiInterval').value=config.interval;
+   byId('aiAllContacts').checked=!!config.allContacts;
    byId('aiClearKey').checked=false;byId('aiConsent').checked=false;
    selected=new Set(config.contacts);contacts();
    fields().forEach(field=>field.disabled=false);
@@ -63,7 +71,7 @@
   try{
    const config={endpoint:byId('aiEndpoint').value.trim(),model:byId('aiModel').value.trim(),
     apiKey:byId('aiKey').value,clearKey:byId('aiClearKey').checked,style:byId('aiStyle').value,
-    interval:Number(byId('aiInterval').value),contacts:[...selected]};
+    interval:Number(byId('aiInterval').value),contacts:[...selected],allContacts:byId('aiAllContacts').checked};
    display(await api('/api/ai/config',config));byId('aiKey').value='';
    if(start){display(await api('/api/ai/start',{}));byId('aiSettings').close();}
   }catch(error){status(error.message,true);}finally{byId('aiSave').disabled=byId('aiStart').disabled=false;}
@@ -74,17 +82,5 @@
   try{display(await api('/api/ai/pause',{}));return true;}catch(error){status(error.message);notify('未确认 AI 已暂停，请检查连接或停止本地服务。',true);return false;}
  }
  byId('aiPause').onclick=pause;byId('aiPauseDialog').onclick=pause;
- async function manualInput(){
-  if(!active||pausedForInput)return;
-  pausedForInput=true;
-  try{await pause();}finally{pausedForInput=false;}
- }
- byId('draft').addEventListener('input',manualInput);
- byId('draft').addEventListener('compositionstart',manualInput);
- byId('draft').addEventListener('paste',manualInput);
- byId('pickImage').addEventListener('click',manualInput);
- // Navigating to notes/preview is an explicit return to manual use too.
- for(const id of ['privacyButton','notesNav','demoButton','settingsDemo'])byId(id).addEventListener('click',manualInput);
- document.addEventListener('keydown',event=>{if(event.key==='Escape')manualInput();});
  refreshAI();setInterval(refreshAI,2000);
 })();

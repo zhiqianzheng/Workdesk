@@ -24,7 +24,7 @@ def bubble_direction(rgb):
     # Any substantial green area prevents interpreting this row as incoming.
     if regions(green):
         return 'outgoing'
-    candidates = [s for s in regions(white) + regions(grey) if .055*w <= s[0] <= .27*w
+    candidates = [s for s in regions(white) + regions(grey) if max(20, min(48, .055*w)) <= s[0] <= .27*w
                   and s[0]+s[2] < .91*w and s[3] < h-2]
     if len(candidates) != 1:
         return 'unknown'

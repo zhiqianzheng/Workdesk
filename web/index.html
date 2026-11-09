@@ -11,7 +11,7 @@
     <div class="section-label">项目目录 <button id="refreshSide" title="刷新项目目录" aria-label="刷新项目目录">↻</button></div>
     <div id="unreadSummary" class="unread-summary" role="status" aria-live="polite">正在读取会话更新…</div>
     <div class="search"><span>⌕</span><input id="search" placeholder="输入备注名或群名…" aria-label="搜索联系人或项目"></div>
-    <div class="directory-actions"><button id="searchContacts" disabled>搜索联系人</button><button id="clearDirectory" hidden>返回目录</button></div><div id="projects" class="projects"></div>
+    <div class="directory-actions"><button id="backDirectory" type="button" title="返回微信主会话列表" disabled>← 返回上一级</button><button id="searchContacts" disabled>搜索联系人</button><button id="clearDirectory" hidden>清除搜索</button></div><div id="projects" class="projects"></div>
     <div class="sidebar-bottom"><span class="dot" id="connectionDot"></span><span id="connectionLabel">正在检查连接</span><button id="settingsButton" aria-label="打开设置">⚙</button></div>
   </aside>
   <main>
@@ -58,19 +58,20 @@
 <dialog id="aiSettings" aria-labelledby="aiTitle">
 <div class="dialog-title"><h2 id="aiTitle">AI 自动回复</h2><button type="button" id="aiClose" aria-label="关闭 AI 设置">×</button></div>
 <p id="aiStatus" role="status">已关闭</p>
-<p class="ai-notice">默认关闭，每次重启需手动启用。仅处理选中会话的新文字；启用时已有消息不回复。会依次切换微信会话读取，手动切换、发送或输入会暂停接管。</p>
+<p class="ai-notice">默认关闭，每次重启需手动启用。开启后自动检测和回复新文字，不逐条确认；已有消息不补回复。切换、搜索、翻历史或手动输入不会关闭接管。后台检测新消息；自动操作仅在微信已处于前台且键鼠空闲至少2秒时进行。使用其他软件时等待，不抢占前台；公众号等目录需手动返回普通聊天。可随时一键暂停。</p>
 <label>API 地址（兼容 Chat Completions）<input id="aiEndpoint" type="url" placeholder="https://你的服务地址/v1" maxlength="1000" autocomplete="off"></label>
 <label>模型名称<input id="aiModel" placeholder="填写服务商提供的模型 ID" maxlength="120" autocomplete="off"></label>
 <label>API 密钥<input id="aiKey" type="password" autocomplete="new-password" placeholder="本机加密保存；留空保留已保存密钥" maxlength="4096"></label>
 <label class="ai-check"><input id="aiClearKey" type="checkbox">清除已保存的密钥（无密钥本地模型）</label>
 <label>回复风格<textarea id="aiStyle" rows="3" maxlength="2000"></textarea></label>
-<label>同一联系人最短回复间隔（秒）<input id="aiInterval" type="number" min="10" max="600" value="30"></label>
+<label>同一联系人最短回复间隔（秒）<input id="aiInterval" type="number" min="1" max="600" value="2"></label>
+<label class="ai-check"><input id="aiAllContacts" type="checkbox">全部好友和普通群聊自动接管（无需逐个添加，排除公众号、服务通知等系统会话）</label>
 <div class="ai-contact-heading"><strong>接管的联系人</strong><button type="button" id="aiAddCurrent">加入当前联系人</button></div>
-<p class="ai-notice">从最近会话中勾选，最多20个。未出现的联系人请先在工作台搜索并打开，再回来添加。名称须唯一；联系人改名后需重新选择。</p>
+<p class="ai-notice">未开启全部接管时，从最近会话中勾选，最多20个。全部接管时下面的名单不限制范围。依据微信已加载的最近会话检测更新；名称重复、窗口不可读取时等待，不冒险猜测对象。</p>
 <div id="aiContacts" class="ai-contacts"></div>
 <p class="ai-notice">启用后，最近最多12条可识别的文字会传给上述接口（每条最多1500字），可能产生 API 费用。图片、语音和方向无法确认的消息不自动回复；目前方向识别适配微信默认浅色气泡。密钥由 Windows 当前用户加密保存，不会返回网页或写入日志。</p>
-<label class="ai-check"><input id="aiConsent" type="checkbox">允许将所选会话的文字发送到此 API，并将生成的回复自动发给这些联系人。</label>
+<label class="ai-check"><input id="aiConsent" type="checkbox">允许将上述接管范围的文字发送到此 API，并将生成的回复自动发送，无需逐条确认。</label>
 <div class="ai-actions"><button type="button" id="aiSave">保存配置（保持关闭）</button><button type="button" id="aiStart" class="primary">保存并启用</button><button type="button" id="aiPauseDialog">一键暂停</button></div>
-<p class="ai-notice">一键暂停会取消尚未发出的回复；已经点击发送的消息无法撤回。发送结果未知时暂停，不自动补发。每小时最多60条。请保持微信打开、未最小化；不要在接管时同时操作原微信。</p>
+<p class="ai-notice">一键暂停会取消尚未发出的回复；已发送消息无法撤回。窗口短暂变化、接口连接失败会自动重试；发送结果未知的那条不会重发，其他会话继续。每小时最多600条，额度恢复后继续。请保持微信打开、未最小化。轮询等待约0.5秒，实际回复还需要窗口读取、模型生成和发送时间。</p>
 </dialog>
 </body></html>

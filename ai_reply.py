@@ -1,5 +1,6 @@
 """Opt-in, allowlisted text replies. Conversation content stays in memory."""
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 import base64
 import ctypes
 from ctypes import wintypes
@@ -11,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from ai_schedule import SessionQueue, eligible, matches_preview
 
 
 class ReplyError(Exception):
@@ -71,7 +73,7 @@ def generate(config, records):
                              'content': row['text'][:1500]})
     payload = json.dumps({'model': config['model'], 'messages': messages, 'stream': False,
                           'max_tokens': 600}, ensure_ascii=False).encode('utf-8')
-    headers = {'Content-Type': 'application/json'}
+    headers = {'Content-Type': 'application/json', 'User-Agent': 'Workdesk/1.0'}
     if config['apiKey']:
         headers['Authorization'] = 'Bearer ' + config['apiKey']
     request = urllib.request.Request(config['endpoint'], data=payload, headers=headers, method='POST')
@@ -107,8 +109,24 @@ def new_tail(previous, current):
     for count in range(min(len(previous), len(current)), 0, -1):
         if previous[-count:] == current[:count]:
             return current[count:]
+    # WeChat may relabel an older timestamp (23:49 -> yesterday 23:49),
+    # or insert older rows while new messages arrive. A unique unchanged
+    # suffix still anchors the previous end; edits before it are not a reset.
+    for count in range(min(len(previous), len(current)), 1, -1):
+        anchor = previous[-count:]
+        positions = [i for i in range(len(current)-count+1)
+                     if current[i:i+count] == anchor]
+        if len(positions) == 1:
+            return current[positions[0]+count:]
     # No overlap means history navigation, a reset, or missed context; establish a new baseline.
     return ()
+
+
+def text_tail(rows):
+    for row in reversed(rows):
+        if row.get('direction') == 'outgoing' or row.get('kind') == 'text':
+            return row
+    return {}
 
 
 class AutoReply:
@@ -121,10 +139,19 @@ class AutoReply:
         self.status = '已关闭'
         self.thread = None
         self.config = {'endpoint': '', 'model': '', 'apiKey': '', 'style': '自然、简短、友好，不使用夸张语气。',
-                       'contacts': [], 'interval': 30}
+                       'contacts': [], 'allContacts': False, 'interval': 2}
         self.baselines, self.pending, self.last_sent = {}, {}, {}
         self.sent_times = []
         self.cursor = 0
+        self.metrics = {'observations': 0, 'replies': 0, 'lastModelSeconds': None}
+        self.metrics.update(scans=0, scanFailures=0, lastScanAt=None, lastScanSeconds=None)
+        self.last_progress = time.monotonic()
+        self.last_scan = None
+        self.scan_available = None
+        self.scan_detail = ''
+        self.uncertain = {}
+        self.provider_failures = {}
+        self.reply_cache = {}
         self._load()
 
     def _load(self):
@@ -140,6 +167,9 @@ class AutoReply:
     @staticmethod
     def validate(data):
         config = {k: data.get(k) for k in ('endpoint', 'model', 'apiKey', 'style', 'contacts', 'interval')}
+        config['allContacts'] = data.get('allContacts', False)
+        if type(config['allContacts']) is not bool:
+            raise ReplyError('接管范围格式无效。')
         config['endpoint'] = endpoint(config['endpoint'])
         for key, limit in (('model', 120), ('apiKey', 4096), ('style', 2000)):
             value = config[key]
@@ -153,14 +183,26 @@ class AutoReply:
         if any(not isinstance(n, str) or not n.strip() or len(n) > 120 or any(ord(c)<32 for c in n) for n in contacts):
             raise ReplyError('联系人名称无效。')
         config['contacts'] = list(dict.fromkeys(contacts))
-        if type(config['interval']) is not int or not 10 <= config['interval'] <= 600:
-            raise ReplyError('每位联系人回复间隔须为10–600秒。')
+        if type(config['interval']) is not int or not 1 <= config['interval'] <= 600:
+            raise ReplyError('每位联系人回复间隔须为1–600秒。')
         return config
 
     def public(self):
         with self.lock:
+            now = time.monotonic()
+            health = 'off'
+            if self.enabled:
+                if not self.thread or not self.thread.is_alive() or now - self.last_progress > 40:
+                    health = 'stalled'
+                elif self.scan_available is None:
+                    health = 'starting'
+                else:
+                    health = 'monitoring' if self.scan_available else 'waiting'
             return {**{k: v for k, v in self.config.items() if k != 'apiKey'},
-                    'hasKey': bool(self.config['apiKey']), 'enabled': self.enabled, 'status': self.status}
+                    'hasKey': bool(self.config['apiKey']), 'enabled': self.enabled, 'status': self.status,
+                    'metrics': dict(self.metrics), 'uncertainContacts': list(self.uncertain),
+                    'health': {'state': health, 'detail': self.scan_detail,
+                               'scanAgeSeconds': None if self.last_scan is None else round(now-self.last_scan, 1)}}
 
     def save(self, data):
         self.pause('配置已更改，请手动启用。')
@@ -187,6 +229,7 @@ class AutoReply:
             self.epoch += 1
             self.status = reason
             self.pending.clear()
+            self.reply_cache.clear()
         return self.public()
 
     def start(self):
@@ -194,7 +237,7 @@ class AutoReply:
             if self.enabled:
                 return self.public()
             self.validate(self.config)
-            if not self.config['contacts']:
+            if not self.config.get('allContacts') and not self.config['contacts']:
                 raise ReplyError('请先选择联系人并保存。')
             if self.thread and self.thread.is_alive():
                 raise ReplyError('上一轮请求仍在结束，请稍后再启用。')
@@ -202,6 +245,10 @@ class AutoReply:
             self.pending.clear()
             self.enabled = True
             self.epoch += 1
+            self.last_progress = time.monotonic()
+            self.last_scan = None
+            self.scan_available = None
+            self.scan_detail = ''
             self.status = '正在建立消息基线；已有消息不回复。'
             self.thread = threading.Thread(target=self._run, args=(self.epoch,), daemon=True, name='workdesk-ai')
             self.thread.start()
@@ -211,50 +258,104 @@ class AutoReply:
     def permit(self, epoch, name):
         # Pause waits only for the current native operation, never for a network request.
         with self.lock:
-            if not self.enabled or self.epoch != epoch or name not in self.config['contacts']:
+            if not self.enabled or self.epoch != epoch or not eligible(name, self.config):
                 raise ReplyError('接管已暂停或联系人授权已变化。')
             yield
 
     def _native(self, method, *args):
+        with self.lock:
+            self.last_progress = time.monotonic()
         return self.service.worker.submit(self.service.call, method, *args).result(timeout=30)
 
     def _run(self, epoch):
+        queue, jobs, retry_after = SessionQueue(), {}, {}
+        pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='workdesk-model')
         try:
             while not self.stop_event.is_set():
                 with self.lock:
                     if not self.enabled or epoch != self.epoch:
                         return
                     config = dict(self.config)
-                    name = config['contacts'][self.cursor % len(config['contacts'])]
-                    self.cursor += 1
-                result = self._native('ai_observe', name, lambda: self.permit(epoch, name))
-                if 'error' in result:
-                    raise ReplyError(result['error'])
-                if not result.get('available'):
-                    with self.permit(epoch, name):
-                        self.status = result.get('detail', '等待联系人出现在最近会话中。')
-                else:
-                    self.process(result, epoch, config)
-                if self.stop_event.wait(2):
+                for name, job in list(jobs.items()):
+                    if job.done():
+                        del jobs[name]
+                        job.result()
+                began = time.monotonic()
+                directory = self._native('ai_scan')
+                readable = not directory.get('error') and bool(directory.get('available'))
+                with self.lock:
+                    if not self.enabled or epoch != self.epoch:
+                        return
+                    self.last_progress = time.monotonic()
+                    self.last_scan = self.last_progress
+                    self.scan_available = readable
+                    self.scan_detail = '' if readable else (directory.get('detail') or directory.get('error') or '微信窗口暂不可读取。')
+                    self.metrics['scans'] += 1
+                    self.metrics['scanFailures'] += int(not readable)
+                    self.metrics['lastScanAt'] = time.time()
+                    self.metrics['lastScanSeconds'] = round(self.last_progress - began, 2)
+                if not readable:
+                    with self.lock:
+                        if self.enabled and epoch == self.epoch:
+                            self.status = '接管开启，等待微信窗口可读取；将自动重试。'
+                    if self.stop_event.wait(1):
+                        return
+                    continue
+                available = queue.update(directory['sessions'], config)
+                with self.lock:
+                    pending = list(self.pending)
+                busy = set(jobs) | {n for n,t in retry_after.items() if time.monotonic() < t}
+                name, event = queue.take(available, busy, directory.get('current'), pending)
+                if name and len(jobs) < 2:
+                    result = self._native('ai_observe', name, lambda: self.permit(epoch, name))
+                    if result.get('available'):
+                        result['newEvent'] = matches_preview(result['records'], event)
+                        queue.consumed(name, event)
+                        with self.lock:
+                            self.metrics['observations'] += 1
+                        jobs[name] = pool.submit(self.process, result, epoch, config)
+                    else:
+                        retry_after[name] = float('inf') if result.get('unsupported') else time.monotonic() + 1
+                        if result.get('unsupported'):
+                            queue.consumed(name, event)
+                        with self.lock:
+                            if self.enabled and epoch == self.epoch:
+                                self.status = result.get('detail') or '接管开启，会话暂不可读，稍后自动重试。'
+                elif not jobs and not pending:
+                    with self.lock:
+                        if self.enabled and epoch == self.epoch:
+                            self.status = '正在检测最近会话，等待新文字消息。'
+                if self.stop_event.wait(.5):
                     return
         except Exception as error:
             with self.lock:
                 if epoch == self.epoch:
                     self.pause(str(error) if isinstance(error, ReplyError) else '自动回复操作中断，已暂停；请核对微信后再启用。')
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def process(self, observed, epoch, config):
         name, rows = observed['name'], observed['records']
         current = signature(rows)
+        target = text_tail(rows)
         now = time.monotonic()
         with self.permit(epoch, name):
             previous = self.baselines.get(name)
             self.baselines[name] = current
-            if previous is None:
+            if name in self.uncertain:
+                if (new_tail(self.uncertain[name], current) and rows
+                        and rows[-1].get('direction') == 'incoming'):
+                    del self.uncertain[name]
+                else:
+                    self.status = f'{name}：上次发送结果不明，不重复发送；其他会话继续接管。'
+                    return
+            if previous is None and not observed.get('newEvent'):
                 self.status = '已建立基线，等待新文字消息。'
                 return
             added = new_tail(previous, current)
-            if added:
-                if rows[-1].get('direction') == 'incoming' and rows[-1].get('kind') == 'text':
+            if added or observed.get('newEvent'):
+                new_text = any(r.get('kind') == 'text' for r in (rows[-len(added):] if added else rows[-1:]))
+                if target.get('direction') != 'outgoing' and target.get('kind') == 'text' and (new_text or name in self.pending):
                     self.pending[name] = (current, now)
                 else:
                     self.pending.pop(name, None)
@@ -262,10 +363,20 @@ class AutoReply:
             elif previous != current:
                 self.pending.pop(name, None)
             pending = self.pending.get(name)
-            if rows and rows[-1].get('direction') != 'incoming':
+            if target.get('kind') != 'text':
+                self.pending.pop(name, None)
+                self.status = '接管开启，等待新文字消息；图片和语音不自动回复。'
+                return
+            if target.get('direction') == 'outgoing':
                 self.pending.pop(name, None)
                 return
-            if not pending or pending[0] != current or now - pending[1] < 3:
+            if target.get('direction') == 'unknown':
+                self.status = ('等待确认新消息方向；将自动重新识别。' if pending
+                               else '接管开启，等待新文字消息。')
+                return
+            if not pending or pending[0] != current or now - pending[1] < .5:
+                if not pending:
+                    self.status = '接管开启，等待新文字消息。'
                 return
             if observed.get('hasDraft'):
                 self.status = '原窗口有草稿，等待你处理；自动回复不会清空草稿。'
@@ -274,24 +385,52 @@ class AutoReply:
                 self.status = '等待回复间隔。'
                 return
             self.sent_times = [t for t in self.sent_times if now-t < 3600]
-            if len(self.sent_times) >= 60:
-                raise ReplyError('已达到每小时60条自动回复上限，已暂停。')
+            if len(self.sent_times) >= 600:
+                self.status = '已达到每小时600条自动回复上限，额度恢复后继续。'
+                return
             self.pending.pop(name, None)
-            self.status = '正在生成回复…'
-        text = generate(config, rows)
+            self.status = f'{name}：正在生成回复…'
+            cached = self.reply_cache.get(name)
+        began = time.monotonic()
+        try:
+            text = cached[1] if cached and cached[0] == current else generate(config, rows)
+        except ReplyError as error:
+            with self.permit(epoch, name):
+                failures = self.provider_failures.get(name, 0) + 1
+                self.provider_failures[name] = failures
+                delay = min(60, 5 * 2 ** min(failures-1, 4))
+                self.pending[name] = (current, time.monotonic() + delay)
+                self.status = f'{name}：{error} {delay}秒后自动重试；尚未执行发送。'
+            return
         with self.permit(epoch, name):
+            self.provider_failures.pop(name, None)
+            if not cached or cached[0] != current:
+                self.metrics['lastModelSeconds'] = round(time.monotonic() - began, 2)
+            self.reply_cache[name] = (current, text)
             self.status = '正在核对会话与新消息…'
         result = self._native('ai_deliver', name, observed['binding'], current, text,
                               lambda: self.permit(epoch, name))
+        if result.get('state') in ('deferred', 'rejected', 'not_sent'):
+            with self.permit(epoch, name):
+                self.pending[name] = (current, time.monotonic())
+                self.status = '接管仍开启，等待手动操作结束后重新核对消息。'
+            return
         if result.get('state') == 'stale':
             with self.permit(epoch, name):
+                self.pending[name] = (current, time.monotonic())
                 self.status = '会话、草稿或消息已变化，本次回复已取消。'
             return
         if result.get('state') != 'observed':
-            raise ReplyError('AI 回复未确认发送，已暂停。请到原窗口核对；不会自动重发。')
+            with self.permit(epoch, name):
+                self.reply_cache.pop(name, None)
+                self.uncertain[name] = current
+                self.status = f'{name}：发送结果未确认，不重复发送；其他会话继续接管。'
+            return
         with self.permit(epoch, name):
+            self.reply_cache.pop(name, None)
             self.last_sent[name] = time.monotonic()
             self.sent_times.append(time.monotonic())
+            self.metrics['replies'] += 1
             self.status = '已在本机观察到自动回复；等待新消息。'
 
     def close(self):
