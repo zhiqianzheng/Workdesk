@@ -44,7 +44,9 @@ class Supervisor:
         self.attempts += 1
         self.next_start = time.monotonic() + min(60, 5 * 2 ** min(self.attempts - 1, 4))
         python = Path(sys.executable).with_name('pythonw.exe')
-        self.child = subprocess.Popen([str(python), str(self.root / 'global_listener.py')],
+        self.child = subprocess.Popen(([str(python), str(Path(__file__).with_name('native_listener.py')), '--root', str(self.root)]
+                          if (self.root / 'private-data/workdesk-native-ai.json').exists() else
+                          [str(python), str(self.root / 'global_listener.py')]),
                                       cwd=self.root, creationflags=subprocess.CREATE_NO_WINDOW)
         return 'restarting'
 

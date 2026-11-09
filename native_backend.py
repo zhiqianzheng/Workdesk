@@ -200,6 +200,10 @@ class NativeAI:
         self.root = Path(settings['directory'])
         self.config_path = config_path
         self.config = {'allContacts': True}
+        config_file = self.root / 'private-data/workdesk-native-ai.json'
+        if config_file.exists():
+            saved = json.loads(config_file.read_text(encoding='utf-8'))
+            self.config = {'allContacts': saved.get('allContacts', False), 'contacts': saved.get('contacts', [])}
         self.lifecycle_lock = threading.Lock()
         self.start_requested = 0
         if (self.root / 'private-data/watchdog.enabled').exists():
@@ -227,9 +231,9 @@ class NativeAI:
         inactive_note = ('原生 AI 已手动暂停，后台守护不会自动恢复。' if stopping else
                          '原生 AI 监听进程已退出，等待后台守护恢复或手动恢复。' if not alive else
                          '原生 AI 心跳超时，进程仍在；暂无法确认正常回复。')
-        return {'backend': 'native', 'enabled': active, 'allContacts': True, 'contacts': [],
+        return {'backend': 'native', 'enabled': active, 'allContacts': self.config['allContacts'], 'contacts': self.config.get('contacts', []),
                 'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True,
-                'status': ('原生后台 AI 已开启：好友与普通群聊。' if active else inactive_note) +
+                'status': ('原生后台 AI 已开启，按已配置的接管范围回复。' if active else inactive_note) +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
                 'metrics': {'replies': status.get('replies', 0)},
                 'health': {'state': 'ready' if active else 'off', 'scanAgeSeconds': round(age, 1)}}
@@ -258,7 +262,9 @@ class NativeAI:
             raise ReplyError('监听进程尚未确认停止，请稍候再试。')
         (self.root / 'private-data/global.stop').unlink(missing_ok=True)
         python = Path(sys.executable).with_name('pythonw.exe')
-        subprocess.Popen([str(python), str(self.root / 'global_listener.py')], cwd=self.root,
+        subprocess.Popen(([str(python), str(Path(__file__).with_name('native_listener.py')), '--root', str(self.root)]
+                          if (self.root / 'private-data/workdesk-native-ai.json').exists() else
+                          [str(python), str(self.root / 'global_listener.py')]), cwd=self.root,
                          creationflags=subprocess.CREATE_NO_WINDOW)
         self.start_requested = time.monotonic() + 15
         return {**self.public(), 'status': '已请求启动原生 AI，稍后会更新状态。'}
