@@ -384,7 +384,7 @@ class NativeAI:
                           (' 已启用图片回复。' if self.config.get('mediaReplies') else '') +
                           (' 本人微信口令监听正常。' if controls_active else ' 本人微信口令监听尚未就绪。') +
                           ' 关闭工作台网页不会停止独立 AI 服务。',
-                'metrics': {'replies': status.get('replies', 0)},
+                'metrics': {k: status.get(k, 0) for k in ('replies', 'active', 'queued', 'blocked')},
                 'health': {'state': 'ready' if active else 'off', 'scanAgeSeconds': round(age, 1)}}
 
     def pause(self):

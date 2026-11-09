@@ -25,7 +25,14 @@ elif '--self-check' in sys.argv:
     import native_watchdog
     p = Platform()
     assert hashlib.sha256(p.wx.read_bytes()).hexdigest() == WX_HASH
-    Path(sys.argv[2]).write_text(json.dumps({'ok': True, 'frozen': bool(getattr(sys,'frozen',False)), 'nativeComponentVerified': True}), encoding='utf-8')
+    from desktop_ui import build_console
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        preview = Platform(root=directory, runtime=directory, vendor=p.wx)
+        window = build_console(preview, preview=True)
+        window.withdraw();window.update();window.destroy()
+    Path(sys.argv[2]).write_text(json.dumps({'ok': True, 'frozen': bool(getattr(sys,'frozen',False)),
+        'nativeComponentVerified': True, 'desktopUIVerified': True}), encoding='utf-8')
 else:
     from desktop_app import main
     main()
