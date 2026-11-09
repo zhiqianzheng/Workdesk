@@ -35,6 +35,69 @@ class OwnerControlTests(unittest.TestCase):
         self.assertEqual(json.loads(self.controls.path.read_text())['cursor'], '10')
         self.controls.request.assert_called_once_with('threads?limit=1')
 
+    def test_account_transport_uses_account_resource_without_trailing_slash(self):
+        from unittest.mock import MagicMock
+        (self.private/'api-token').write_text('synthetic')
+        response=MagicMock();response.__enter__.return_value.read.return_value=b'{"authenticated":true}'
+        with patch('native_controls.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value=response
+            self.assertTrue(OwnerControls(self.root).request('')['authenticated'])
+        self.assertEqual(opener.return_value.open.call_args.args[0].full_url,'http://127.0.0.1:6175/v1/accounts/owner')
+
+    def test_query_aliases_and_unauthorized_query_is_ignored(self):
+        for text in ['查询AI回复状态', '查询AI自动回复状态', '请查看 ai 自动回复的状态。']:
+            self.assertEqual(control_text(text), 'status')
+            self.assertFalse(replyable(dict(type=1,direction='incoming',body=text)))
+        self.event('查询AI回复状态', direction='incoming')
+        self.assertFalse(json.loads(self.controls.path.read_text()).get('queries'))
+        self.assertFalse(self.controls.stop.exists())
+
+    def test_owner_status_feedback_works_while_paused_and_is_idempotent(self):
+        self.controls.stop.touch()
+        row=dict(id='query1',body='查询AI回复状态',type=1,direction='outgoing',accountId='owner',
+                 threadId='filehelper',createdAt=datetime.now(timezone.utc).isoformat())
+        event=dict(cursor='12',kind='message.committed',data=dict(direction='outgoing',origin='live',messageId='query1',threadId='filehelper'))
+        calls=[]
+        def request(path,data=None,key=None):
+            if path.startswith('events?'):return {'items':[event]}
+            if path=='messages/query1':return row
+            if path=='':return {'authenticated':True,'connection':'online'}
+            if path=='sends':
+                calls.append((data,key));return {'state':'accepted','serverId':'confirmed'}
+            self.fail(path)
+        self.controls.request=Mock(side_effect=request)
+        self.controls.poll();self.controls.poll()
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0][0]['threadId'],'filehelper')
+        self.assertIn('已暂停',calls[0][0]['text'])
+        self.assertTrue(calls[0][1].startswith('owner-status-'))
+        self.assertTrue(self.controls.stop.exists())
+
+    def test_uncertain_status_send_retries_same_key_and_payload(self):
+        state=json.loads(self.controls.path.read_text());state['queries']={'q':{'thread':'filehelper'}}
+        self.controls.status_text=Mock(return_value='AI 状态：暂停')
+        self.controls.request=Mock(side_effect=[TimeoutError(),{'state':'accepted','serverId':'confirmed'}])
+        with self.assertRaises(TimeoutError):self.controls.flush_queries(state)
+        first=self.controls.request.call_args
+        self.controls.flush_queries(state)
+        self.assertEqual(self.controls.request.call_args,first)
+        self.controls.status_text.assert_called_once()
+
+    def test_status_checks_process_heartbeat_and_blocked_sessions(self):
+        import time
+        path=self.private/'global-status.json'
+        self.controls.request=Mock(return_value={'authenticated':True,'connection':'online'})
+        status=dict(pid=1,state='listening',updatedAt=time.time(),blocked=0,active=0,queued=0)
+        path.write_text(json.dumps(status))
+        with patch('native_backend.NativeAI.process_alive',return_value=True):
+            self.assertIn('已开启，正在监听',self.controls.status_text())
+            status['blocked']=1;path.write_text(json.dumps(status))
+            self.assertIn('需要检查',self.controls.status_text())
+            status.update(blocked=0,updatedAt=0);path.write_text(json.dumps(status))
+            self.assertIn('未就绪',self.controls.status_text())
+        with patch('native_backend.NativeAI.process_alive',return_value=False):
+            self.assertIn('未就绪',self.controls.status_text())
+
     def test_intent_aliases_but_not_substrings_or_negations(self):
         self.assertEqual(control_text(' 停止AI回复\n'), 'pause')
         for text in ['关闭AI回复', '暂停 ai 回复。', '帮我先把AI自动回复关掉吧', '请关闭AI回复功能', '先关一下AI回复']:

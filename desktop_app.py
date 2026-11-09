@@ -21,6 +21,30 @@ WX_HASH = ('01982b5d84af1f8ce2a20cb3655a2115aca5b045c586efa0ed91fd08c54e337c' if
 
 
 class Platform:
+    def create_shortcut(self):
+        if os.name == 'nt':
+            if not getattr(sys, 'frozen', False):
+                raise ValueError('请在 Windows 便携发行包中创建快捷方式。')
+            script = Path(sys.executable).parent / '创建桌面快捷方式.vbs'
+            subprocess.run(['cscript.exe', '//Nologo', str(script)], check=True, timeout=15,
+                           capture_output=True, **background())
+        else:
+            result = subprocess.run(['xdg-user-dir', 'DESKTOP'], capture_output=True, text=True, timeout=5)
+            desktop = Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else Path.home() / 'Desktop'
+            desktop.mkdir(parents=True, exist_ok=True)
+            wrapper = Path.home() / '.local/bin/workdesk'
+            executable = wrapper if wrapper.is_file() else Path('/usr/bin/workdesk')
+            if not executable.is_file():
+                raise ValueError('请先安装 Workdesk DEB 发行包。')
+            quote = lambda p: '"' + str(p).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+            icon = Path(__file__).parent / 'assets/workdesk.png'
+            entry = desktop / 'Workdesk.desktop'
+            entry.write_text('[Desktop Entry]\nType=Application\nName=Workdesk\nExec=' + quote(executable)
+                + '\nIcon=' + str(icon) + '\nTerminal=false\nStartupWMClass=Workdesk\nCategories=Network;Utility;\n', encoding='utf-8')
+            entry.chmod(0o755)
+            subprocess.run(['gio', 'set', str(entry), 'metadata::trusted', 'true'], capture_output=True, timeout=5)
+        return '桌面快捷方式已创建。'
+
     def __init__(self, root=None, runtime=None, vendor=None):
         self.root = Path(root or data_home() / 'agent')
         self.runtime = Path(runtime or runtime_dir())
@@ -176,157 +200,5 @@ class Platform:
 
 
 def main():
-    import tkinter as tk
-    from tkinter import ttk
-    from PIL import Image, ImageTk
-    app = tk.Tk()
-    app.title('Workdesk · 连接与 AI 控制台')
-    app.geometry('900x840')
-    app.minsize(760, 680)
-    platform = Platform()
-    events = queue.Queue()
-    busy = False
-    widgets = []
-    rows = []
-    qr_stamp = None
-    ttk.Style().configure('TButton', padding=7)
-    frame = ttk.Frame(app, padding=20); frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text='Workdesk', font=('Segoe UI', 22, 'bold')).pack(anchor='w')
-    ttk.Label(frame, text='一次配置，后台聊天。账号和密钥仅保存在这台电脑。').pack(anchor='w', pady=(0, 12))
-    try:
-        saved_mode = json.loads((platform.runtime / 'desktop-mode.json').read_text()).get('mode', 'native')
-    except (OSError, ValueError):
-        saved_mode = 'native'
-    mode = tk.StringVar(value=saved_mode if os.name == 'nt' and saved_mode in ('native', 'uia') else 'native')
-    choice = ttk.Frame(frame); choice.pack(fill='x')
-    for value, label in [('native', '后台模式（推荐，不占用键鼠）'), ('uia', '官方微信窗口模式（需自行登录）')]:
-        if os.name != 'nt' and value == 'uia':
-            continue
-        button = ttk.Radiobutton(choice, text=label, variable=mode, value=value);button.pack(side='left', padx=6);widgets.append(button)
-    status = tk.StringVar(value='首次使用：准备后台 → 扫码登录 → 打开工作台。需要自动回复时，再配置下方 AI。')
-    ttk.Label(frame, textvariable=status, wraplength=780).pack(fill='x', pady=12)
-    controls = ttk.Frame(frame);controls.pack(fill='x')
-
-    def task(fn, done=None):
-        nonlocal busy
-        if busy:
-            return
-        busy = True
-        for w in widgets: w.configure(state='disabled')
-        status.set('正在处理，请稍候；不会操作其他软件的鼠标键盘。')
-        def run():
-            try: events.put((True, fn(), done))
-            except Exception as error: events.put((False, str(error) if isinstance(error, ValueError) else '操作失败，请检查网络或重试。', None))
-        threading.Thread(target=run, daemon=True).start()
-
-    def button(parent, text, callback):
-        b = ttk.Button(parent, text=text, command=callback);b.pack(side='left', padx=3);widgets.append(b);return b
-
-    def prepared(online):
-        status.set('已登录，可打开工作台或刷新接管对象。' if online else '后台已准备好，请点击“扫码登录”。手机可能显示 Linux 设备并挤掉原电脑微信。')
-    prepare_button = button(controls, '1. 准备后台', lambda: task(platform.prepare, prepared))
-    login_button = button(controls, '2. 扫码登录', lambda: task(platform.login, lambda _: status.set('登录完成，可以打开工作台。')))
-    button(controls, '3. 打开工作台', lambda: task(lambda: platform.open(mode.get())))
-    qr_window = tk.Toplevel(app)
-    qr_window.title('手机微信扫码登录')
-    qr_window.geometry('310x300')
-    qr_window.withdraw()
-    qr_window.protocol('WM_DELETE_WINDOW', qr_window.withdraw)
-    ttk.Label(qr_window, text='请用自己的手机微信扫码并确认').pack(pady=12)
-    qr = ttk.Label(qr_window);qr.pack(pady=5)
-    form = ttk.LabelFrame(frame, text='可选：AI 自动回复（初次配置默认暂停）', padding=12);form.pack(fill='both', expand=True)
-    try:
-        saved_ai = json.loads((platform.root / 'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        saved_ai = {}
-    fields = {}
-    for name, label, default in [('endpoint','API 地址',''),('model','模型 ID',''),('apiKey','API 密钥',''),('style','回复风格','自然口语化，简短友好，根据话题回复一到三句。')]:
-        row = ttk.Frame(form);row.pack(fill='x', pady=3)
-        ttk.Label(row, text=label, width=12).pack(side='left')
-        entry = ttk.Entry(row, show='●' if name == 'apiKey' else '');entry.insert(0, saved_ai.get(name, default) if name != 'apiKey' else '');entry.pack(side='left', fill='x', expand=True)
-        fields[name] = entry;widgets.append(entry)
-    ttk.Label(form, text='地址示例：https://你的服务/v1；密钥不回显、由系统保护，再次保存留空可保留。').pack(anchor='w')
-    all_chats = tk.BooleanVar(value=saved_ai.get('allContacts', False))
-    check = ttk.Checkbutton(form, text='接管全部好友和普通群聊（否则只回复下方选中的对象）', variable=all_chats);check.pack(anchor='w');widgets.append(check)
-    selection = tk.Listbox(form, selectmode='multiple', height=5, exportselection=False);selection.pack(fill='both', expand=True);widgets.append(selection)
-    actions = ttk.Frame(form);actions.pack(fill='x', pady=5)
-    def show_contacts(items):
-        nonlocal rows
-        rows = items;selection.delete(0, 'end')
-        saved_path = platform.root / 'private-data/workdesk-native-ai.json'
-        saved = json.loads(saved_path.read_text(encoding='utf-8')) if saved_path.exists() else {}
-        for i, item in enumerate(items):
-            selection.insert('end', item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'])
-            if item['id'] in saved.get('contacts', []):selection.selection_set(i)
-        for name in ['endpoint', 'model', 'style']:
-            if name in saved:fields[name].delete(0, 'end');fields[name].insert(0, saved[name])
-        all_chats.set(saved.get('allContacts', False))
-        web_search.set(saved.get('webSearch', False))
-        media_replies.set(saved.get('mediaReplies', False))
-        status.set('已加载最近会话；缺少对象时，请先用手机与对方聊一句，再刷新。')
-    button(actions, '刷新接管对象', lambda: task(platform.contacts, show_contacts))
-    def save():
-        data = {name: entry.get() for name, entry in fields.items()}
-        data.update(contacts=[rows[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(), webSearch=web_search.get(), mediaReplies=media_replies.get(), interval=1)
-        task(lambda: platform.save(data), lambda _: (fields['apiKey'].delete(0, 'end'), status.set('配置已保存，AI 保持暂停。确认授权后点击开启。')))
-    button(actions, '保存配置', save)
-    consent = tk.BooleanVar(value=False)
-    check = ttk.Checkbutton(form, text='允许将所选会话文字提交给上述 API，并自动发送生成的回复', variable=consent);check.pack(anchor='w');widgets.append(check)
-    web_search = tk.BooleanVar(value=saved_ai.get('webSearch', False))
-    check = ttk.Checkbutton(form, text='允许 AI 按需联网查询天气、新闻等（需要支持联网工具的 API）', variable=web_search);check.pack(anchor='w');widgets.append(check)
-    media_replies = tk.BooleanVar(value=saved_ai.get('mediaReplies', False))
-    check = ttk.Checkbutton(form, text='允许按对方请求生成并发送图片或表情图片（消耗图像额度，原生后台模式）', variable=media_replies);check.pack(anchor='w');widgets.append(check)
-    ai_buttons = ttk.Frame(form);ai_buttons.pack(fill='x', pady=5)
-    def start():
-        if not consent.get():status.set('请先确认文字提交与自动回复授权。');return
-        if not (platform.root / 'private-data/workdesk-native-ai.json').exists():status.set('请先保存 AI 配置。');return
-        task(lambda: platform.ai().start(), lambda r: status.set(r['status']))
-    button(ai_buttons, '开启 / 恢复 AI', start)
-    button(ai_buttons, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])))
-    button(ai_buttons, '检查运行状态', lambda: task(lambda: platform.ai().public(), lambda r: status.set(r['status'])))
-    ttk.Label(frame, text='关闭此窗口不会停止后台 AI；要停止自动回复，请点“暂停 AI”。未设置开机自启。', wraplength=780).pack(pady=8)
-
-    def mode_changed(*_):
-        if mode.get() == 'uia':
-            form.pack_forget()
-            prepare_button.configure(state='disabled');login_button.configure(state='disabled')
-            status.set('先在官方电脑版微信登录，再点“打开工作台”。AI 在网页内配置；此模式自动发送需要微信前台且键鼠空闲。')
-        else:
-            form.pack(fill='both', expand=True)
-            prepare_button.configure(state='normal');login_button.configure(state='normal')
-    mode.trace_add('write', mode_changed)
-    mode_changed()
-
-    def poll():
-        nonlocal busy, qr_stamp
-        try:
-            ok, result, done = events.get_nowait()
-            busy = False
-            for w in widgets:w.configure(state='normal')
-            if mode.get() == 'uia':
-                prepare_button.configure(state='disabled');login_button.configure(state='disabled')
-            status.set('操作完成。' if ok else result)
-            if ok and done:
-                try:done(result)
-                except Exception:status.set('结果显示失败，请重新检查状态。')
-            if not busy:
-                qr.configure(image='');qr.image=None;qr_window.withdraw()
-        except queue.Empty:
-            pass
-        path = platform.root / 'login.png'
-        if busy and path.exists():
-            try:
-                stamp = path.stat().st_mtime_ns
-                if stamp != qr_stamp:
-                    with Image.open(path) as picture:
-                        picture.thumbnail((210,210));photo = ImageTk.PhotoImage(picture.copy())
-                    qr.configure(image=photo);qr.image=photo;qr_stamp=stamp
-                    qr_window.deiconify()
-                    status.set('请用自己的手机微信扫描二维码并确认登录。')
-            except OSError:
-                pass
-        app.after(250, poll)
-    poll()
-    if mode.get() == 'native':
-        app.after(350, lambda: task(platform.prepare, prepared))
-    app.mainloop()
+    from desktop_ui import build_console
+    build_console().mainloop()

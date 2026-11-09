@@ -2,7 +2,7 @@ name: Build desktop releases
 on:
   workflow_dispatch:
   push:
-    tags: ['v1.1.0-preview.4']
+    tags: ['v1.1.0-preview.5']
 permissions:
   contents: write
 jobs:
@@ -34,6 +34,12 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Browser logic regression tests
         run: node tests/test_refresh.cjs
+      - name: Native console smoke test
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-tk xvfb
+          xvfb-run -a python -m unittest discover -s tests -p test_desktop_ui.py -v
       - name: Build and verify package
         run: python scripts/build_release.py ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
@@ -57,4 +63,4 @@ jobs:
       - name: Publish preview
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --title 'Workdesk v1.1.0-preview.4' --notes-file docs/releases/v1.1.0-preview.4.md
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --title 'Workdesk v1.1.0-preview.5' --notes-file docs/releases/v1.1.0-preview.5.md
