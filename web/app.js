@@ -190,8 +190,9 @@ async function loadHistory(direction){
  let cooldown=180;
  historyNotice=direction==='latest'?'正在返回最新消息…':direction==='older'?'正在加载更早记录…':'正在加载后续记录…';render();
  try{
-  const next=await api('/api/history',{binding,direction});
+  const next=await action('/api/history',{binding,direction});
   if(next.state==='pending'){cooldown=900;historyNotice='微信仍在加载，请稍候点同步。';return;}
+  if(next.retryable&&state.connected){markSyncDelayed(next.detail);return;}
   if(next.current?.binding!==binding)throw new Error('会话已变化，请重新同步。');
   historyBrowsing=direction!=='latest';
   if(!next.historyChanged)cooldown=900;
@@ -317,21 +318,21 @@ function renderProjects(){
 async function searchContacts(){
  if(busy||demo||!state.canSearch)return;const query=$('search').value.trim();if(!query)return;
  busy=true;revision++;render();
- try{const result=await api('/api/search',{query});
+ try{const result=await action('/api/search',{query});
   if(result.state==='pending'){notify('搜索仍在进行，请稍候再次搜索。');return;}
   if($('search').value.trim()===query){directoryResults=result.results;renderProjects();}
  }catch(error){notify(error.message);}finally{busy=false;render();}
 }
 async function clearDirectory(){
  if(busy)return;busy=true;revision++;
- try{if(state.canSearch&&!demo)await api('/api/search',{query:''});directoryResults=null;$('search').value='';}
+ try{if(state.canSearch&&!demo)await action('/api/search',{query:''});directoryResults=null;$('search').value='';}
  catch(error){notify(error.message);}finally{busy=false;render();}
 }
 async function backDirectory(){
  if(busy||demo||!state.canGoBack)return;
  rememberDraft();busy=true;revision++;render();
  try{
-  const next=await api('/api/back',{});
+  const next=await action('/api/back',{});
   if(next.state==='pending'){notify('正在返回，请稍候刷新目录。');return;}
   directoryResults=null;$('search').value='';historyBrowsing=false;historyRows=[];
   applyState(next);notify('已返回主会话列表。');
@@ -354,11 +355,32 @@ async function refresh(manual=false){
    if(manual)notify(next.detail);
    return;
   }
+  if(next.retryable&&state.connected){markSyncDelayed(next.detail);return;}
   applyState(next);
   if(next.connected)$('syncTime').textContent=new Date().toLocaleTimeString('zh-CN',{hour12:false});
   if(manual)notify(next.connected?'已更新本机记录。':next.detail);
- }catch(error){applyState({connected:false,sessions:[],records:[],canSend:false,detail:error.message});if(manual)notify(error.message);}
+ }catch(error){
+  if(busy||demo||version!==revision)return;
+  if(state.connected)markSyncDelayed(error.message);
+  else applyState({connected:false,sessions:[],records:[],canSend:false,detail:error.message});
+  if(manual)notify(error.message);
+ }
  finally{refreshing=false;}
+}
+function markSyncDelayed(detail){
+ state={...state,canSend:false,canSendImage:false,detail};render();
+ $('connectionLabel').textContent='同步暂缓 · 正在重试';
+ $('connectionDot').classList.remove('connected');
+}
+async function action(path,body){
+ let next=await api(path,body);
+ while(next.state==='pending'&&next.operationId){
+  notify('正在加载会话，请稍候…',true);
+  await new Promise(resolve=>setTimeout(resolve,250));
+  next=await api('/api/action-status',{operationId:next.operationId});
+ }
+ $('status').classList.remove('visible');
+ return next;
 }
 async function selectProject(project){
  if(busy)return;
@@ -368,8 +390,9 @@ async function selectProject(project){
  let confirmed=null;
  busy=true;revision++;render();
  try{
-  const next=await api('/api/select',{id:project.id});
+  const next=await action('/api/select',{id:project.id});
   if(next.state==='pending'){notify(next.detail,true);return;}
+  $('status').classList.remove('visible');
   directoryResults=null;$('search').value='';applyState(next);
   if(next.connected&&next.view!=='navigation'&&next.current?.key===project.key)confirmed=next.current;
  }catch(error){notify(error.message);}
