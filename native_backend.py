@@ -155,21 +155,23 @@ class NativeConnection:
             self.directory_scanning = False
             self.directory_refresh_at = time.monotonic() + 15
 
-    def snapshot(self):
+    def snapshot(self, selecting=False):
         account = None
+        retryable = True
         try:
             account = self.request('')
             if not account.get('authenticated'):
                 return self.unavailable('微信尚未登录或登录已失效，请在桌面控制台扫码登录。', False)
             if account.get('connection') != 'online':
                 return self.unavailable('微信已登录，但后台连接尚未就绪，请稍候重试。', True)
-            self.refresh_directory()
+            if not selecting:
+                self.refresh_directory()
             sessions = [self.session(info) for info in self.directory.values()]
             ordinary = [s for s in sessions if not s.get('publicAccount')]
             if not self.selected and ordinary and not self.directory_only and self.directory_view == 'root':
                 self.selected = ordinary[0]['id']
             if self.selected:
-                info = self.info()
+                info = self.known[self.selected] if selecting and self.selected in self.known else self.info()
                 current = self.session(info)
                 if not any(s['id'] == self.selected for s in sessions):
                     sessions.insert(0, current)
@@ -190,13 +192,14 @@ class NativeConnection:
         except TimeoutError:
             detail = '微信已登录，但读取会话超时，正在重试。' if account else '微信后台响应超时，请稍后重试。'
         except urllib.error.HTTPError as error:
+            retryable = error.code not in (401, 403)
             detail = ('本机后台访问凭据无效，请从桌面控制台重新准备后台。' if error.code in (401, 403)
                       else '微信后台接口返回错误（HTTP %s），请稍后重试。' % error.code)
         except (urllib.error.URLError, OSError):
             detail = '无法访问本机微信后台，请在桌面控制台检查后台运行状态。'
         except (ValueError, KeyError, TypeError):
             detail = '微信后台返回的数据格式不兼容，请检查后台组件版本。'
-        return self.unavailable(detail, bool(account and account.get('authenticated')))
+        return {**self.unavailable(detail, bool(account and account.get('authenticated'))), 'retryable': retryable}
 
     @staticmethod
     def unavailable(detail, authenticated):
@@ -208,13 +211,13 @@ class NativeConnection:
             self.directory_view = 'subscriptions'
             self.directory_only = True
             self.selected, self.history, self.rows, self.cursor = None, False, [], None
-            return self.snapshot()
+            return self.snapshot(selecting=True)
         if ident not in self.known:
             raise ValueError('请先从目录或搜索结果选择联系人。')
         self.directory_only = False
         self.directory_view = 'subscriptions' if self.public_account(self.known[ident]) else 'root'
         self.selected, self.history, self.rows, self.cursor = ident, False, [], None
-        return self.snapshot()
+        return self.snapshot(selecting=True)
 
     def navigate_back(self):
         # Native mode has no foreground window to navigate: return to our root

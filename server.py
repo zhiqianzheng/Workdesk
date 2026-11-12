@@ -1,7 +1,7 @@
 """Loopback-only project workdesk; chat payloads are never written to disk."""
 import argparse
 from host_runtime import data_home
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, CancelledError
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -33,6 +33,7 @@ class Service:
         self.sends = {}
         self.read_future = None
         self.action_future = None
+        self.operations = {}
         self.manual_until = 0
         self.history_binding = None
         self.search_active = False
@@ -134,8 +135,14 @@ class Service:
                 self.history_binding = args[0]
             elif method == 'search' and args[0]:
                 self.search_active = True
+            if self.read_future is not None:
+                self.read_future.cancel()
             self.read_future = None
             self.action_future = self.worker.submit(self.call, method, *args)
+            self.action_future.operation_id = secrets.token_urlsafe(18)
+            self.operations[self.action_future.operation_id] = self.action_future
+            while len(self.operations) > 32:
+                del self.operations[next(iter(self.operations))]
             return self.action_future
 
     def send(self, request_id, binding, text, kind='text'):
@@ -213,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = future.result(timeout=1)
                 self.server.service.consume_read(future)
                 self.respond(200, result)
-            except TimeoutError:
+            except (TimeoutError, CancelledError):
                 self.respond(202, {'pending': True, 'detail': '正在读取微信后台会话，请稍候；完成后会自动更新。'})
             return
         if self.path == '/api/send-status':
@@ -310,6 +317,15 @@ class Handler(BaseHTTPRequestHandler):
                     self.respond(404, {'error': '本次进程未找到该请求。请核对原窗口后再决定是否重发。'})
                     return
                 future = entry[1]
+            elif self.path == '/api/action-status':
+                operation_id = data.get('operationId')
+                if not isinstance(operation_id, str):
+                    raise ValueError('操作编号无效。')
+                with service.lock:
+                    future = service.operations.get(operation_id)
+                if future is None:
+                    self.respond(404, {'error': '操作记录已过期，请同步当前会话。'})
+                    return
             elif self.path == '/api/history':
                 binding, direction = data.get('binding'), data.get('direction')
                 if not isinstance(binding, str) or len(binding) != 24 or direction not in ('older', 'newer', 'latest'):
@@ -340,7 +356,9 @@ class Handler(BaseHTTPRequestHandler):
                 result = future.result(timeout=9)
                 self.respond(409 if 'error' in result else 200, result)
             except TimeoutError:
-                self.respond(202, {'state': 'pending', 'detail': '操作仍在进行，不要重复发送。可点“检查上次发送”。'})
+                operation_id = getattr(future, 'operation_id', None)
+                self.respond(202, {'state': 'pending', 'operationId': operation_id,
+                                  'detail': '正在加载会话，请稍候…' if operation_id else '操作仍在进行，不要重复发送。可点“检查上次发送”。'})
         except (ValueError, TypeError, json.JSONDecodeError):
             self.respond(400, {'error': '请求无效或上一项操作未完成，请检查内容后稍候重试。'})
 
