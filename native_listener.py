@@ -104,12 +104,21 @@ def work(thread, messages, since=0):
                         datetime.fromisoformat(row['createdAt'].replace('Z', '+00:00')).timestamp() >= since]
             if not received:
                 return {'state': 'skipped_old_history'}
-        context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False),voice_enabled=CONFIG.get('voiceReplies',False),voice_language=CONFIG.get('voiceLanguage','zh'))
+        from native_ppt import requested, create_reply
+        making_ppt = requested(received)
+        context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False),voice_enabled=CONFIG.get('voiceReplies',False),voice_language=CONFIG.get('voiceLanguage','zh'), include_documents=making_ppt)
         if STOP.exists():return {'state':'cancelled'}
         config = dict(CONFIG)
+        config['presentationGeneration'] = True
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()
-        reply = generate(config, context)
+        if making_ppt:
+            try:
+                reply = create_reply(config, context)
+            except Exception:
+                reply = '这次 PPT 制作没有完成，内容生成或文件检查失败，没有生成可发送的成品。可以稍后让我重新制作。'
+        else:
+            reply = generate(config, context)
         # Generated content must never impersonate the owner's control command.
         if control_text(str(reply)):
             return {'state': 'skipped_control_output'}
@@ -118,6 +127,24 @@ def work(thread, messages, since=0):
             return {'state': 'cancelled'}
         key = 'global-v1-' + hashlib.sha256((thread + '|' + '|'.join(sorted(messages))).encode()).hexdigest()[:40]
         images = getattr(reply, 'images', ())
+        if getattr(reply, 'file_payload', None):
+            from native_files import send_file
+            from native_backend import key as binding_key
+            connection = NativeConnection({'directory': str(ROOT), 'account': CONFIG['account']})
+            connection.selected = thread
+            try:
+                if STOP.exists():
+                    return {'state': 'cancelled'}
+                dispatched = True
+                result = send_file(connection, binding_key(thread), reply.file_payload,
+                                   request_id=key + '-pptx', should_stop=STOP.exists)
+                if result.get('state') != 'observed':
+                    return {'state': 'uncertain' if result.get('state') != 'not_sent' else 'retry',
+                            'errorType': 'PresentationSendUnconfirmed'}
+            finally:
+                connection.close()
+            if STOP.exists():
+                return {'state': 'cancelled'}
         if images:
             from native_images import send_image
             from native_backend import key as binding_key

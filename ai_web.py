@@ -43,7 +43,7 @@ def web_payload(config, messages):
         instructions.append('这是本人的个人对话，按任务需要提供充分解释、步骤和代码，不必限制为简短闲聊；需要比较时可以使用列表或表格。')
     if config.get('mediaReplies'):
         instructions.append('你具备生成图片、获取在线表情素材并由程序发送图片的能力。对方明确要求画图、发图片、表情包时，'
-            '必须实际调用 image_generation 或 get_sticker，不能仅给提示词、链接或声称没有该能力。'
+            '必须实际调用 image_generation、generate_image 或 get_sticker，不能仅给提示词、链接或声称没有该能力。'
             '按具体要求生成；只是随便要一张图时可以选轻松中性的卡通。每次最多一张。'
             '定制梗图使用图像生成；简单表情可以选在线素材。用户已授权在贴合话题和情绪时主动发图，不必等待明确索要。'
             '先判断图片是否比文字更贴切，例如接住笑点、庆祝具体好事、表达此刻反应或提供必要示意；不合适就只回文字。'
@@ -67,7 +67,8 @@ def web_payload(config, messages):
         inputs.append({'role': message['role'], 'content': content})
     tools = [{'type': 'web_search', 'external_web_access': True}] if config.get('webSearch', True) else []
     if config.get('mediaReplies'):
-        tools += [{'type':'image_generation','quality':'low','size':'1024x1024'}, sticker_tool()]
+        from image_provider import settings as image_settings, tool as image_tool
+        tools += [image_tool() if image_settings() else {'type':'image_generation','quality':'low','size':'1024x1024'}, sticker_tool()]
     return {'model': config['model'], 'instructions': '\n'.join(instructions),
             'input': inputs, 'tools': tools,
             'tool_choice': 'auto', 'include': ['web_search_call.action.sources'],
@@ -81,6 +82,10 @@ def response_text(result, diagnostics=None, allow_media=False):
     searches = 0
     images = []
     for item in result.get('output', []):
+        if allow_media and item.get('type') == 'function_call' and item.get('name') == 'generate_image' and not images:
+            from image_provider import generate_image
+            generated = generate_image(json.loads(item.get('arguments', '{}')).get('prompt'))
+            images.extend(generated.images)
         if allow_media and item.get('type') == 'image_generation_call' and item.get('result') and not images:
             images.append(image_result(item['result']))
         if allow_media and item.get('type') == 'function_call' and item.get('name') == 'get_sticker' and not images:
@@ -120,10 +125,10 @@ def generate_with_search(config, messages, diagnostics=None):
     headers = {'Content-Type': 'application/json', 'User-Agent': 'Workdesk/1.1'}
     if config.get('apiKey'):
         headers['Authorization'] = 'Bearer ' + config['apiKey']
-    request = urllib.request.Request(responses_endpoint(config['endpoint']),
-        data=json.dumps(web_payload(config, messages), ensure_ascii=False).encode('utf-8'),
-        headers=headers, method='POST')
     try:
+        request = urllib.request.Request(responses_endpoint(config['endpoint']),
+            data=json.dumps(web_payload(config, messages), ensure_ascii=False).encode('utf-8'),
+            headers=headers, method='POST')
         with urllib.request.build_opener(NoRedirect).open(request, timeout=240 if config.get('mediaReplies') else 90) as response:
             raw = response.read(24*1024*1024+1 if config.get('mediaReplies') else 1048577)
         if len(raw) > (24*1024*1024 if config.get('mediaReplies') else 1048576):
@@ -131,6 +136,10 @@ def generate_with_search(config, messages, diagnostics=None):
         try:
             return response_text(json.loads(raw), diagnostics, allow_media=config.get('mediaReplies', False))
         except StickerUnavailable:
+            from image_provider import settings as image_settings, generate_image
+            if image_settings():
+                prompt = next((m['content'] for m in reversed(messages) if m.get('role') == 'user' and isinstance(m.get('content'), str)), '生成一张轻松友好的卡通表情图片。')
+                return generate_image(prompt[:8000])
             # A bounded fallback: generate one image rather than looping over providers.
             payload = web_payload(config, messages)
             payload['tools'] = [{'type':'image_generation','quality':'low','size':'1024x1024'}]

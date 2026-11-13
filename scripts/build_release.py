@@ -52,6 +52,12 @@ def linux():
         shutil.rmtree(stage)
     app = stage / 'usr/lib/workdesk'
     copy_app(app)
+    # Pure Python document wheels ship with the app on Ubuntu 22.04 as well;
+    # lxml and Pillow use the target distribution's native packages.
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--only-binary=:all:',
+                    '--no-deps', '--target', str(app), 'pypdf==7.0.1',
+                    'python-pptx==1.0.2', 'XlsxWriter==3.3.1',
+                    'typing_extensions==4.16.0'], check=True)
     from install_video_tools import install
     install(app / '_vendor')
     from install_speech_tools import install as speech_install
@@ -67,7 +73,7 @@ Architecture: amd64
 Maintainer: Workdesk Project
 Section: net
 Priority: optional
-Depends: python3 (>= 3.10), python3-tk, python3-pil, python3-pil.imagetk, libsecret-tools, gnome-keyring, dbus-user-session, ca-certificates, xdg-utils, libc6 (>= 2.35), libgcc-s1, libstdc++6
+Depends: python3 (>= 3.10), python3-tk, python3-pil, python3-pil.imagetk, python3-lxml, libsecret-tools, gnome-keyring, dbus-user-session, ca-certificates, xdg-utils, libc6 (>= 2.35), libgcc-s1, libstdc++6
 Description: Local Workdesk desktop and native messaging backend
  Desktop preview with optional configurable AI replies.
 '''.format(version=VERSION.replace('-preview.', '~preview.')))
