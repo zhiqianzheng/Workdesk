@@ -58,7 +58,10 @@ def document_text(name, raw):
     extension = PurePosixPath(name).suffix.lower()
     if len(raw) > MAX_FILE:
         raise ValueError('文件超过 8 MB。')
-    if extension == '.docx':
+    if extension in ('.pdf', '.xlsx', '.pptx'):
+        from native_documents import office_text, pdf_text
+        text = pdf_text(raw) if extension == '.pdf' else office_text(extension, raw)
+    elif extension == '.docx':
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             part = z.getinfo('word/document.xml')
             if part.file_size > 4 * 1024 * 1024:
@@ -86,10 +89,16 @@ def document_text(name, raw):
     return text[:12000] + ('\n[内容已截断，仅提供前 12000 字符]' if len(text) > 12000 else '')
 
 
-def send_file(connection, binding, payload):
+def send_file(connection, binding, payload, request_id=None, should_stop=None):
     from native_backend import key
     recipient = connection.selected
-    if not recipient or key(recipient) != binding or not connection.writable(connection.info()):
+    if should_stop and should_stop():
+        return {'state': 'not_sent', 'detail': '已暂停，未发送文件。'}
+    try:
+        writable = recipient and key(recipient) == binding and connection.writable(connection.info())
+    except Exception:
+        return {'state': 'not_sent', 'detail': '会话查询失败，尚未提交文件发送。'}
+    if not writable:
         return {'state': 'not_sent', 'detail': '当前会话不可发送文件。'}
     try:
         data = json.loads(payload)
@@ -102,10 +111,10 @@ def send_file(connection, binding, payload):
         upload = json.loads(binary(connection, 'uploads', body, 'multipart/form-data; boundary=' + boundary))
     except Exception:
         return {'state': 'not_sent', 'detail': '文件校验或上传失败，未提交发送。'}
-    if connection.selected != recipient:
+    if connection.selected != recipient or (should_stop and should_stop()):
         return {'state': 'not_sent', 'detail': '会话已变化，未发送文件。'}
     try:
-        job = connection.request('sends', {'threadId': recipient, 'kind': 'file', 'sourceId': upload['id']}, 'workdesk-file-' + str(uuid.uuid4()))
+        job = connection.request('sends', {'threadId': recipient, 'kind': 'file', 'sourceId': upload['id']}, request_id or 'workdesk-file-' + str(uuid.uuid4()))
         deadline = time.monotonic() + 90
         while job.get('state') in ('queued', 'running', 'preparing', 'uploading', 'submitting') and time.monotonic() < deadline:
             time.sleep(.3)

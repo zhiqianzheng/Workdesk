@@ -17,7 +17,7 @@ def replyable(row):
         or (row.get('type') == 1 and bool(row.get('body', '').strip())))
 
 
-def context_for(rows, received, root, base, request, video_enabled=False,voice_enabled=False,voice_language='zh'):
+def context_for(rows, received, root, base, request, video_enabled=False,voice_enabled=False,voice_language='zh', include_documents=False):
     latest = max(row.get('createdAt', '') for row in received)
     targets = {row['id'] for row in received if row.get('type') == 3 or is_file(row) or is_video(row) or is_channels(row) or is_voice(row)}
     ordered = sorted(rows, key=lambda row: (row.get('createdAt', ''), str(row.get('serverId', ''))))
@@ -27,7 +27,7 @@ def context_for(rows, received, root, base, request, video_enabled=False,voice_e
     # A text follow-up ("which of these two?") needs the preceding pictures too.
     # Prioritize new attachments; historical pictures fill the remaining budget.
     history = [row['id'] for row in recent if row.get('direction') == 'incoming'
-               and row.get('type') == 3 and row['id'] not in targets]
+               and (row.get('type') == 3 or (include_documents and is_file(row))) and row['id'] not in targets]
     historical = set(history[-max(0, 4 - len(targets)):]) if len(targets) < 4 else set()
     included = targets | historical
     candidates = [row for row in ordered if row.get('direction') in ('incoming', 'outgoing')
@@ -61,9 +61,12 @@ def context_for(rows, received, root, base, request, video_enabled=False,voice_e
                     reason=str(error) if isinstance(error,ValueError) else '视频下载或解码未完成。'
                     result.append({'kind':'document','direction':'incoming','text':'未分析这个视频：'+reason+' 不要猜测其画面或声音。'})
             elif row.get('id') in selected and is_file(row):
-                name, raw = fetch_file(previews.connection, row['id'], row['threadId'])
-                result.append({'kind': 'document', 'direction': 'incoming',
-                               'text': '附件：' + name + '\n' + document_text(name, raw)})
+                try:
+                    name, raw = fetch_file(previews.connection, row['id'], row['threadId'])
+                    text = '附件：' + name + '\n' + document_text(name, raw)
+                except Exception:
+                    text = '未能读取这个附件：可能下载未完成、文件损坏、加密或超出解析限制。请对方重发或补充文字，不能声称已阅读内容。'
+                result.append({'kind': 'document', 'direction': 'incoming', 'text': text})
             elif row.get('id') in selected:
                 result.append({'kind': 'image', 'direction': 'incoming', 'image': previews.fetch(row['id'])})
             elif row.get('direction') == 'outgoing' and row.get('type') == 3:
