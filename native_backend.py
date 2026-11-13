@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from native_process import command
 from native_files import is_file
 
@@ -41,6 +42,10 @@ class NativeConnection:
         self.directory_scanning = False
         self.directory_pages = 0
         self.directory_refresh_at = 0
+        self.directory_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='native-directory')
+        self.directory_future = None
+        self.account_status = None
+        self.account_refresh_at = 0
         from native_images import Previews
         self.previews = Previews(self)
 
@@ -124,10 +129,10 @@ class NativeConnection:
                             'direction': row.get('direction'), 'kind': 'file' if is_file(row) else 'image' if row.get('type') == 3 else 'text'})
         self.rows = records + self.rows if cursor else records
 
-    def refresh_directory(self):
+    def refresh_directory(self, background=False):
         """Read one page per snapshot, keeping already loaded contacts visible."""
         now = time.monotonic()
-        if now < self.directory_refresh_at:
+        if now < self.directory_refresh_at and self.directory_future is None:
             return
         if not self.directory_scanning:
             self.directory_scan = {}
@@ -139,7 +144,22 @@ class NativeConnection:
             path += '&cursor=' + urllib.parse.quote(self.directory_cursor, safe='')
         # Back off transient failures without discarding the current page/cursor.
         self.directory_refresh_at = now + 5
-        page = self.request(path)
+        if self.directory_future is not None:
+            if not self.directory_future.done():
+                return
+            future, self.directory_future = self.directory_future, None
+            try:
+                page = future.result()
+            except Exception:
+                # A slow/failed directory refresh must not discard an open chat.
+                self.directory_refresh_at = time.monotonic() + 5
+                return
+        elif background and self.directory:
+            # Only HTTP runs off-thread; directory state is applied on the viewer worker.
+            self.directory_future = self.directory_worker.submit(self.request, path)
+            return
+        else:
+            page = self.request(path)
         for info in page['items']:
             self.directory_scan[info['id']] = info
         self.directory_cursor = page.get('nextCursor')
@@ -159,19 +179,22 @@ class NativeConnection:
         account = None
         retryable = True
         try:
-            account = self.request('')
+            if self.account_status is None or time.monotonic() >= self.account_refresh_at:
+                self.account_status = self.request('')
+                self.account_refresh_at = time.monotonic() + 3
+            account = self.account_status
             if not account.get('authenticated'):
                 return self.unavailable('微信尚未登录或登录已失效，请在桌面控制台扫码登录。', False)
             if account.get('connection') != 'online':
                 return self.unavailable('微信已登录，但后台连接尚未就绪，请稍候重试。', True)
             if not selecting:
-                self.refresh_directory()
+                self.refresh_directory(background=True)
             sessions = [self.session(info) for info in self.directory.values()]
             ordinary = [s for s in sessions if not s.get('publicAccount')]
             if not self.selected and ordinary and not self.directory_only and self.directory_view == 'root':
                 self.selected = ordinary[0]['id']
             if self.selected:
-                info = self.known[self.selected] if selecting and self.selected in self.known else self.info()
+                info = self.known[self.selected] if self.selected in self.known else self.info()
                 current = self.session(info)
                 if not any(s['id'] == self.selected for s in sessions):
                     sessions.insert(0, current)
@@ -199,6 +222,7 @@ class NativeConnection:
             detail = '无法访问本机微信后台，请在桌面控制台检查后台运行状态。'
         except (ValueError, KeyError, TypeError):
             detail = '微信后台返回的数据格式不兼容，请检查后台组件版本。'
+        self.account_refresh_at = 0
         return {**self.unavailable(detail, bool(account and account.get('authenticated'))), 'retryable': retryable}
 
     @staticmethod
@@ -289,6 +313,7 @@ class NativeConnection:
             return {'state': 'not_sent', 'detail': '文件暂不可下载、超过 8 MB 或校验失败。'}
 
     def close(self):
+        self.directory_worker.shutdown(wait=False, cancel_futures=True)
         self.previews.close()
 
 
