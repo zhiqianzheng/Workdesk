@@ -184,6 +184,29 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def configure_ai(self, data, start=False):
+        """Apply current form values before starting; never resume stale settings."""
+        ai = self.ai()
+        ai.pause()
+        deadline = time.monotonic() + 45
+        status_path = self.root / 'private-data/global-status.json'
+        while status_path.exists():
+            status = json.loads(status_path.read_text(encoding='utf-8'))
+            if not NativeAI.process_alive(status.get('pid')):
+                break
+            if time.monotonic() >= deadline:
+                raise ValueError('旧任务尚未安全退出，本次配置未保存，AI 保持暂停。请稍后重试，未启用旧配置。')
+            time.sleep(.2)
+        self.save(dict(data))
+        if data.get('ownerAssistant'):
+            (self.root / 'private-data/watchdog.enabled').touch()
+        ai = self.ai()
+        ai.ensure_watchdog()
+        if start:
+            result = ai.start()
+            return {**result, 'status': '当前界面配置已保存；' + result['status']}
+        return {'status': '配置已保存，好友/群 AI 保持暂停；个人助手按已保存的独立开关运行。'}
+
     def save(self, data):
         private = self.root / 'private-data'
         self.contacts()  # Validate this account is actually connected.

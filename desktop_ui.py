@@ -6,7 +6,7 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import ttk, font as tkfont
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 
 BG = '#f2f5f5'
 INK = '#17343b'
@@ -53,6 +53,27 @@ def build_console(platform=None, preview=False):
     style.map('TEntry', bordercolor=[('focus', TEAL)])
     style.configure('TCheckbutton', background='white', padding=(0, 5))
     style.map('TCheckbutton', background=[('active', 'white')])
+    # Explicit check marks avoid the clam theme's ambiguous cross indicator.
+    indicators = []
+    size = max(18, round(14 * float(app.tk.call('tk', 'scaling'))))
+    for selected, disabled in [(False, False), (True, False), (False, True), (True, True)]:
+        picture = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(picture)
+        color = '#a7b8b4' if disabled else TEAL
+        draw.rounded_rectangle((1, 1, size-2, size-2), radius=3,
+                               fill=color if selected else 'white', outline=color, width=2)
+        if selected:
+            draw.line([(size*.23, size*.51), (size*.43, size*.71), (size*.78, size*.29)],
+                      fill='white', width=max(2, round(size*.12)), joint='curve')
+        indicators.append(ImageTk.PhotoImage(picture, master=app))
+    app._check_indicators = indicators
+    style.element_create('Workdesk.Check.indicator', 'image', indicators[0],
+                         ('disabled', 'selected', indicators[3]), ('disabled', indicators[2]),
+                         ('selected', indicators[1]), sticky='w')
+    style.layout('TCheckbutton', [('Checkbutton.padding', {'sticky': 'nswe', 'children': [
+        ('Workdesk.Check.indicator', {'side': 'left', 'sticky': ''}),
+        ('Checkbutton.focus', {'side': 'left', 'sticky': 'w', 'children': [
+            ('Checkbutton.label', {'sticky': 'nswe'})]})]})])
     style.configure('TRadiobutton', background='white', padding=(0, 5))
     style.configure('TNotebook', background=BG, borderwidth=0, tabmargins=0)
     style.configure('TNotebook', bordercolor=BG, lightcolor=BG, darkcolor=BG)
@@ -264,24 +285,30 @@ def build_console(platform=None, preview=False):
     ttk.Label(voice_row,text='语音识别语言',style='Card.TLabel').pack(side='left',padx=(0,12))
     language_box=ttk.Combobox(voice_row,textvariable=voice_language,values=list(language_names.values()),width=15,state='readonly')
     language_box.pack(side='left');widgets.append(language_box)
-    def save():
-        if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中配置。');return
+    def form_values():
         data={name: entry.get() for name, entry in fields.items()}
         data.update(contacts=[contacts[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(),
-                    webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(), voiceReplies=voice_replies.get(), voiceLanguage=next((k for k,v in language_names.items() if v==voice_language.get()),'zh'), ownerAssistant=owner_dialog.get(), ownerConsent=consent.get(), interval=1)
-        def saved_ok(_):
-            nonlocal owner_edited
-            owner_edited=False
-            fields['apiKey'].delete(0, 'end');status.set('配置已保存，好友/群 AI 保持暂停；个人助手按独立开关运行。' if owner_dialog.get() else '配置已保存，AI 保持暂停。确认授权后点击开启。')
-        task(lambda: platform.save(data), saved_ok)
+                    webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(),
+                    voiceReplies=voice_replies.get(), voiceLanguage=next((k for k,v in language_names.items() if v==voice_language.get()),'zh'),
+                    ownerAssistant=owner_dialog.get(), ownerConsent=consent.get(), interval=1)
+        return data
+    def applied(result):
+        nonlocal owner_edited
+        owner_edited=False
+        fields['apiKey'].delete(0, 'end')
+        status.set(result['status'])
+    def save():
+        if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中配置。');return
+        data=form_values()
+        task(lambda: platform.configure_ai(data, start=False), applied)
     def start():
         if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中开启。');return
         if not consent.get():status.set('请先勾选会话提交与自动回复授权。');return
-        if not (platform.root/'private-data/workdesk-native-ai.json').exists():status.set('请先保存 AI 配置。');return
-        task(lambda: platform.ai().start(), lambda r: status.set(r['status']))
+        data=form_values()
+        task(lambda: platform.configure_ai(data, start=True), applied)
     ai_actions = ttk.Frame(action_dock);ai_actions.pack(fill='x')
     button(ai_actions, '保存配置', save)
-    button(ai_actions, '开启 / 恢复 AI', start, 'Primary.TButton')
+    button(ai_actions, '保存并开启 / 恢复 AI', start, 'Primary.TButton')
     button(ai_actions, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])), 'Danger.TButton')
     summary = tk.StringVar(value='正在读取运行状态…')
     details = tk.StringVar(value='')
@@ -315,7 +342,11 @@ def build_console(platform=None, preview=False):
                      '监听异常，正在重试' if value.get('health',{}).get('state')!='ready' else
                      '部分会话需要核对' if metrics.get('blocked',0) else
                      '正在处理新消息' if metrics.get('active',0) else '正在接管，等待新消息') if enabled else 'AI 当前已暂停' if value.get('paused') else 'AI 监听未就绪或尚未开启')
-        if not owner_edited:owner_dialog.set(value.get('ownerAssistant',False))
+        if not owner_edited and not busy:
+            try:
+                current=json.loads((platform.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+                owner_dialog.set(current.get('ownerAssistant',False))
+            except (OSError,ValueError):pass
         owner_health=value.get('ownerHealth',{})
         if not enabled and value.get('paused') and value.get('ownerAssistant') and owner_health.get('ready'):
             summary.set('好友/群 AI 已暂停；个人助手可用')
