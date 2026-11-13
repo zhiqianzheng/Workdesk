@@ -158,6 +158,8 @@ class Service:
             if self.action_future is not None and not self.action_future.done():
                 raise ValueError('上一项操作仍在进行，请先检查结果。')
             self.manual_until = time.monotonic() + (1 if self.ai.config.get('allContacts') else 5)
+            if self.read_future is not None:
+                self.read_future.cancel()
             self.read_future = None
             future = self.worker.submit(self.call, {'image': 'send_image', 'file': 'send_file', 'download': 'download_file'}.get(kind, 'send'), binding, text)
             self.action_future = future
