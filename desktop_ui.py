@@ -550,10 +550,12 @@ def build_console(platform=None, preview=False):
             for row in value['samples']:samples.insert('end',row['time']+' · '+row['text'].replace('\n',' ')[:100])
             from tkinter.scrolledtext import ScrolledText
             sample_detail=tk.StringVar(master=window,value='点击样本可查看全文；可以选择多条。')
-            ttk.Label(window,textvariable=sample_detail,wraplength=790).pack(anchor='w',padx=12,pady=5)
+            sample_view=ScrolledText(window,height=4,wrap='word');sample_view.pack(fill='x',padx=12,pady=5)
+            sample_view.insert('1.0',sample_detail.get());sample_view.configure(state='disabled')
             def show_sample(event=None):
                 index=samples.index('active')
-                if index<len(value['samples']):sample_detail.set(value['samples'][index]['text'])
+                if index<len(value['samples']):
+                    sample_view.configure(state='normal');sample_view.delete('1.0','end');sample_view.insert('1.0',value['samples'][index]['text']);sample_view.configure(state='disabled')
             samples.bind('<<ListboxSelect>>',show_sample)
             controls=ttk.Frame(window);controls.pack(fill='x',padx=12)
             ttk.Button(controls,text='全选本人样本（请核对）',command=lambda:samples.selection_set(0,'end')).pack(side='left')
