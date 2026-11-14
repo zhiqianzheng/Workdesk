@@ -25,7 +25,7 @@ def run(root,config,connection,thread,mode,start='',end='',count=None,progress=l
     lower,upper=date_window(start,end) if mode=='date' else (0,float('inf'))
     upper=min(upper,time.time())
     info=connection.request('threads/'+quote(thread,safe=''))
-    if info.get('id')!=thread or not connection.writable(info):raise ValueError('此联系人或群聊不支持读取。')
+    if not isinstance(info,dict) or info.get('id')!=thread or not connection.writable(info):raise ValueError('此联系人或群聊不支持读取。')
     name=info.get('remark') or info.get('displayName') or thread
     private=Path(root)/'private-data';private.mkdir(parents=True,exist_ok=True)
     def check():
@@ -51,11 +51,13 @@ def run(root,config,connection,thread,mode,start='',end='',count=None,progress=l
             while True:
                 check()
                 page=connection.request('threads/'+quote(thread,safe='')+'/messages?limit=50'+('&cursor='+quote(cursor,safe='') if cursor else ''))
+                if not isinstance(page,dict) or not isinstance(page.get('items'),list):raise ValueError('微信后台返回的消息列表格式异常，请刷新连接后重试。')
                 pages+=1
                 for row in page.get('items',[]):
                     check()
+                    if not isinstance(row,dict):continue
                     if row.get('accountId')!=config['account'] or row.get('threadId')!=thread or not row.get('id'):continue
-                    try:stamp=datetime.fromisoformat(row.get('createdAt','').replace('Z','+00:00')).timestamp()
+                    try:stamp=datetime.fromisoformat(str(row.get('createdAt') or '').replace('Z','+00:00')).timestamp()
                     except (TypeError,ValueError):continue
                     if stamp<lower or stamp>=upper:continue
                     body=row.get('body') or ''
@@ -69,6 +71,7 @@ def run(root,config,connection,thread,mode,start='',end='',count=None,progress=l
                 if mode=='count' and total>=count:break
                 cursor=page.get('nextCursor')
                 if not cursor:break
+                if not isinstance(cursor,str):raise ValueError('微信后台返回的分页游标格式异常，未生成不完整报告。')
                 if cursor in cursors:raise ValueError('后台分页游标重复，无法确认记录完整性，未生成报告。')
                 cursors.add(cursor)
             if not total:raise ValueError('此范围内没有可读取的已同步消息。')

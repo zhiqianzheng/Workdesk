@@ -552,7 +552,8 @@ def build_console(platform=None, preview=False):
     report_card=card(pages[2],'聊天总结报告','选择联系人或群聊，读取指定范围后生成 AI 报告。不会发送微信消息，也不会修改接管或记忆设置。')
     report_choose=ttk.Combobox(report_card,state='readonly',values=['我的个人助手（文件传输助手）'])
     report_choose.pack(fill='x');report_choose.current(0)
-    button(report_card,'刷新联系人列表',lambda:task(platform.contacts,show_contacts))
+    report_refresh_row=ttk.Frame(report_card,style='Card.TFrame');report_refresh_row.pack(fill='x',pady=(4,0))
+    button(report_refresh_row,'刷新联系人列表',lambda:task(platform.contacts,show_contacts))
     report_mode=tk.StringVar(master=app,value='日期范围')
     report_mode_box=ttk.Combobox(report_card,textvariable=report_mode,state='readonly',values=['日期范围','最近消息条数','全部已同步记录'])
     report_mode_box.pack(anchor='w',pady=5)
@@ -619,7 +620,14 @@ def build_console(platform=None, preview=False):
                 report_events.put(('done',value))
             except Exception as error:
                 kind=type(error).__name__
-                report_events.put(('error',str(error) if isinstance(error,ValueError) else '生成遇到内部错误（'+kind+'），请保留此提示以便排查。不是已确认的微信断线或API故障。'))
+                # Persist stack locations only: no chat text, credentials or provider bodies.
+                import traceback
+                try:
+                    frames=[{'file':Path(frame.filename).name,'line':frame.lineno,'function':frame.name} for frame in traceback.extract_tb(error.__traceback__)]
+                    diagnostic=platform.root/'private-data/report-last-error.json'
+                    diagnostic.write_text(json.dumps({'type':kind,'frames':frames}),encoding='utf-8');diagnostic.chmod(0o600)
+                except OSError:pass
+                report_events.put(('error',str(error) if isinstance(error,ValueError) else '生成遇到内部错误（'+kind+'），诊断已保存。不是已确认的微信断线或API故障。'))
         threading.Thread(target=run_report,daemon=True).start()
         poll_report()
     def poll_report():

@@ -78,7 +78,7 @@ class ChatReportTests(unittest.TestCase):
         self.assertTrue(all(len(call.args[2]['messages'][1]['content'])<25000 for call in model.call_args_list))
 
     def test_missing_group_sender_and_direction_do_not_crash_report(self):
-        rows=[dict(self.row(1),senderId=None,direction=None),dict(self.row(2),senderId='',direction='incoming')]
+        rows=[dict(self.row(1),senderId=None,direction=None),dict(self.row(2),senderId='',direction='incoming'),dict(self.row(3),createdAt=None)]
         with patch('api_diagnostics.request',return_value=self.model()):
             result=chat_report.run(self.root,self.config,self.connection(rows),'group','all')
         self.assertEqual(result['count'],2)
