@@ -23,6 +23,17 @@ class ApiDiagnosticTests(unittest.TestCase):
         with patch('api_diagnostics.request',return_value={'choices':[{'message':{'content':''}}]}):
             with self.assertRaises(ValueError):test_chat(self.data)
 
+    def test_report_timeout_is_respected_and_distinct_from_unreachable_network(self):
+        with patch('api_diagnostics.urllib.request.build_opener') as opener:
+            opener.return_value.open.side_effect=TimeoutError()
+            with self.assertRaisesRegex(ValueError,'180'):
+                request({**self.data,'requestTimeout':180},'https://example.test')
+            self.assertEqual(opener.return_value.open.call_args.kwargs['timeout'],180)
+            opener.return_value.open.side_effect=urllib.error.URLError('network')
+            with self.assertRaisesRegex(ValueError,'无法连接'):
+                request(self.data,'https://example.test')
+            self.assertEqual(opener.return_value.open.call_args.kwargs['timeout'],30)
+
     def test_errors_do_not_echo_provider_body_or_key(self):
         for code in [401,403,404,429,500]:
             with patch('api_diagnostics.urllib.request.build_opener') as opener:

@@ -576,7 +576,13 @@ def build_console(platform=None, preview=False):
     report_mode.trace_add('write',report_fields);report_fields()
     def show_report():
         result=report_job['result']
-        if not result:return
+        if not result:
+            folder=platform.root/'private-data/chat-reports'
+            saved=sorted(folder.glob('*.md'),key=lambda path:path.stat().st_mtime,reverse=True) if folder.exists() else []
+            if not saved:report_note.set('还没有已完成的报告。');return
+            try:result={'text':saved[0].read_text(encoding='utf-8'),'path':str(saved[0])}
+            except OSError:report_note.set('无法读取上次报告。');return
+            report_job['result']=result
         window=tk.Toplevel(app);window.title('聊天总结报告');window.geometry('850x650')
         from tkinter.scrolledtext import ScrolledText
         body=ScrolledText(window,wrap='word',font=(family,10));body.pack(fill='both',expand=True,padx=12,pady=12)

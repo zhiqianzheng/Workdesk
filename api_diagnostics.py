@@ -23,15 +23,17 @@ def request(config, url, data=None):
     if config['apiKey']:headers['Authorization']='Bearer '+config['apiKey']
     req=urllib.request.Request(url,headers=headers,data=None if data is None else json.dumps(data).encode())
     try:
-        with urllib.request.build_opener(NoRedirect).open(req,timeout=30) as response:raw=response.read(1024*1024+1)
+        with urllib.request.build_opener(NoRedirect).open(req,timeout=config.get('requestTimeout',30)) as response:raw=response.read(1024*1024+1)
         if len(raw)>1024*1024:raise ValueError('接口响应过大，已停止测试。')
         return json.loads(raw)
     except urllib.error.HTTPError as error:
         messages={401:'密钥无效或已过期，请检查 API Key。',403:'服务拒绝访问，请检查密钥权限或服务限制。',
                   404:'接口地址或模型不存在，请检查 URL 和模型 ID。',429:'请求受限，可能额度不足或触发限流，请检查服务账号。'}
         raise ValueError(messages.get(error.code,'接口返回 HTTP %s，请稍后重试。'%error.code)) from None
-    except (TimeoutError,urllib.error.URLError,OSError):
-        raise ValueError('连接超时或网络不可达，请检查 URL、网络和代理设置。') from None
+    except (TimeoutError,urllib.error.URLError,OSError) as error:
+        if isinstance(error,TimeoutError) or isinstance(getattr(error,'reason',None),TimeoutError):
+            raise ValueError('API 等待响应超时（%s 秒），可能是模型处理较慢。'%config.get('requestTimeout',30)) from None
+        raise ValueError('无法连接 API，请检查 URL、网络和代理设置。') from None
     except (json.JSONDecodeError,UnicodeError):
         raise ValueError('接口未返回兼容的 JSON，可能填入了网页地址。') from None
     except ReplyError:
