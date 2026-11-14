@@ -200,14 +200,15 @@ class Platform:
         try:data=memory_history.preview(connection,self.account,thread,days,include_outgoing=True)
         finally:connection.close()
         token=uuid.uuid4().hex;self._style_preview=(token,data)
-        return {'token':token,'name':data['name'],'limited':data['limited'],'samples':[{'id':r['id'],'text':r['body'],'time':r['createdAt']} for r in data['rows'] if r.get('direction')=='outgoing']}
+        from conversation_style import redact
+        return {'token':token,'name':data['name'],'limited':data['limited'],'samples':[{'id':r['id'],'text':redact(r['body']),'time':r['createdAt']} for r in data['rows'] if r.get('direction')=='outgoing']}
 
-    def style_learning_analyze(self,token,selected):
+    def style_learning_analyze(self,token,selected,progress=lambda value:None):
         import conversation_style
         cached=getattr(self,'_style_preview',None)
         if not cached or cached[0]!=token:raise ValueError('请先重新读取聊天样本。')
         config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
-        return conversation_style.analyze(config,cached[1],selected)
+        return conversation_style.analyze(config,cached[1],selected,progress)
 
     def apply_learned_style(self,thread,style):
         if not isinstance(style,str) or not style.strip():raise ValueError('请先分析样本或填写风格规则。')

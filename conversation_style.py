@@ -1,15 +1,14 @@
 """Learn contact-specific expression only from owner-confirmed outgoing samples."""
 import json
 import time
+import re
 
 
-def analyze(config,preview,selected):
+def _analyze_batch(config,preview,selected):
     if preview['account']!=config['account'] or time.time()-preview['createdAt']>600:raise ValueError('样本预览已过期，请重新读取。')
     choices=set(selected)
     own=[r for r in preview['rows'] if r['id'] in choices and r.get('direction')=='outgoing']
     if not own:raise ValueError('请至少选择一条确实由你本人写的消息。')
-    # Selected messages are always included, bounded explicitly rather than silently dropping them.
-    if sum(len(r['body'])+len(r['id']) for r in own)>20000:raise ValueError('所选样本过长，请减少选择后再学习。')
     context=[{'id':r['id'],'speaker':'我','text':r['body']} for r in own]
     budget=24000-sum(len(r['body'])+len(r['id']) for r in own)
     for row in preview['rows']:
@@ -32,3 +31,63 @@ def analyze(config,preview,selected):
     evidence=result.get('evidence',[])
     if not isinstance(evidence,list) or not evidence or any(not isinstance(x,str) or x not in valid for x in evidence):raise ValueError('AI风格缺少有效的本人样本依据，未应用。')
     return {'style':result['style'].strip(),'samples':len(own),'evidence':evidence,'thread':preview['thread']}
+
+
+def redact(text):
+    text=re.sub(r'(?i)\bsk-[a-z0-9_-]{8,}', '[密钥已隐藏]',text)
+    text=re.sub(r'(?i)((?:api[ _-]?key|token|password|密码)\s*[:：=]\s*)([^\s，。；;]{6,})',r'\1[凭据已隐藏]',text)
+    return text
+
+
+def analyze(config,preview,selected,progress=lambda value:None):
+    if preview['account']!=config['account'] or time.time()-preview['createdAt']>600:raise ValueError('样本预览已过期，请重新读取。')
+    choices=set(selected)
+    own=[r for r in preview['rows'] if r['id'] in choices and r.get('direction')=='outgoing']
+    if not own:raise ValueError('请至少选择一条确实由你本人写的消息。')
+    chunks=[];part=[];size=0
+    for row in own:
+        text=redact(row['body'])
+        for offset in range(0,max(1,len(text)),6000):
+            piece={**row,'body':text[offset:offset+6000]}
+            length=len(piece['body'])+len(row['id'])
+            if part and size+length>12000:chunks.append(part);part=[];size=0
+            part.append(piece);size+=length
+    if part:chunks.append(part)
+    results=[]
+    safe_context=[{**r,'body':redact(r['body'])} for r in preview['rows'] if r.get('direction')=='incoming']
+    for number,chunk in enumerate(chunks,1):
+        progress('正在分析第 %s / %s 批本人样本…'%(number,len(chunks)))
+        # Revalidate account but do not expire a job that has already started.
+        order={r['id']:i for i,r in enumerate(preview['rows'])}
+        ordered=sorted(chunk+safe_context,key=lambda r:order[r['id']])
+        batch={**preview,'createdAt':time.time(),'rows':ordered}
+        results.append(_analyze_batch(config,batch,[r['id'] for r in chunk]))
+    from api_diagnostics import settings,request
+    provider=settings({'endpoint':config['endpoint'],'model':config['model']},config);provider['requestTimeout']=180
+    valid={r['id'] for r in own}
+    while len(results)>1:
+        progress('正在合并各批聊天风格…')
+        groups=[];part=[];size=0
+        for result in results:
+            item={'style':result['style'],'evidence':result['evidence'][:8]}
+            length=len(json.dumps(item,ensure_ascii=False))
+            if part and size+length>14000:groups.append(part);part=[];size=0
+            part.append(item);size+=length
+        if part:groups.append(part)
+        merged=[]
+        for group in groups:
+            response=request(provider,provider['endpoint'],{'model':provider['model'],'messages':[
+                {'role':'system','content':'合并同一联系人的各批聊天风格分析，去重、保留一致习惯，差异按场景说明，不把分析文字本身当说话样本。不新增身份关系、经历或承诺，不固定每条句式。输出JSON {"style":"最多1000字规则","evidence":["输入中已有的本人样本id"]}，evidence最多8项。'},
+                {'role':'user','content':json.dumps(group,ensure_ascii=False)}], 'max_tokens':1800,'stream':False})
+            raw=response['choices'][0]['message']['content'].strip()
+            if raw.startswith('```'):raw=raw.split('\n',1)[-1].rsplit('```',1)[0].strip()
+            value=json.loads(raw)
+            if not isinstance(value.get('style'),str) or not value['style'].strip() or len(value['style'])>1000:raise ValueError('AI合并风格失败，未应用。')
+            evidence=value.get('evidence',[])
+            allowed={x for item in group for x in item['evidence']}
+            if not isinstance(evidence,list) or not evidence or any(not isinstance(x,str) or x not in allowed or x not in valid for x in evidence):raise ValueError('合并结果缺少有效本人样本依据，未应用。')
+            merged.append({'style':redact(value['style']),'evidence':evidence[:8]})
+        if len(merged)>=len(results):raise ValueError('风格合并未能收敛，请重试或更换模型。')
+        results=merged
+    result=results[0]
+    return {**result,'style':redact(result['style']),'samples':len(own),'batches':len(chunks),'thread':preview['thread']}

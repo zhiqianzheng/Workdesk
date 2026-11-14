@@ -19,3 +19,22 @@ class StyleLearningTests(unittest.TestCase):
         response={'choices':[{'message':{'content':json.dumps({'style':'规则','evidence':['other']})}}]}
         with patch('api_diagnostics.settings',return_value={'endpoint':'http://localhost','model':'test'}),patch('api_diagnostics.request',return_value=response):
             with self.assertRaises(ValueError):analyze({'account':'a','endpoint':'http://localhost','model':'test'},data,['mine'])
+
+    def test_large_selection_is_fully_batched_and_credentials_are_redacted(self):
+        from conversation_style import redact
+        rows=[{'id':'mine%s'%i,'direction':'outgoing','body':'普通聊天内容'*1800+(' sk-testsecretvalue12345' if i==0 else '')} for i in range(4)]
+        data={'account':'a','thread':'friend','createdAt':time.time(),'rows':rows}
+        seen=set()
+        def respond(config,url,payload):
+            value=json.loads(payload['messages'][1]['content'])
+            self.assertNotIn('sk-testsecretvalue12345',payload['messages'][1]['content'])
+            if 'speaker' in value[0]:
+                ids=[r['id'] for r in value if r['speaker']=='我'];seen.update(ids)
+            else:ids=[x for r in value for x in r['evidence']]
+            return {'choices':[{'message':{'content':json.dumps({'style':'自然短句，不固定口头禅。','evidence':ids[:2]})}}]}
+        with patch('api_diagnostics.settings',return_value={'endpoint':'http://localhost','model':'test'}),patch('api_diagnostics.request',side_effect=respond):
+            result=analyze({'account':'a','endpoint':'http://localhost','model':'test'},data,[r['id'] for r in rows])
+        self.assertEqual(result['samples'],4)
+        self.assertGreater(result['batches'],1)
+        self.assertEqual(seen,{r['id'] for r in rows})
+        self.assertNotIn('sk-testsecretvalue12345',redact('API Key: sk-testsecretvalue12345'))

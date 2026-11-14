@@ -84,6 +84,7 @@ def build_console(platform=None, preview=False):
     style.configure('Horizontal.TProgressbar', background=TEAL, troughcolor=BG, borderwidth=0)
     events = queue.Queue()
     health_events = queue.Queue()
+    style_progress = queue.Queue()
     health_busy = False
     cached_connection = {}
     owner_edited = False
@@ -569,6 +570,11 @@ def build_console(platform=None, preview=False):
                     note.set('已应用：今后回复此对象会参考这个风格。接管范围和启停不变。');status.set(message)
                 except ValueError as error:note.set(str(error))
             apply_button=ttk.Button(window,text='应用这个风格（即时生效）',command=apply_style,state='disabled');apply_button.pack(pady=6)
+            learning_cancel=threading.Event()
+            window.bind('<Destroy>',lambda event:learning_cancel.set() if event.widget is window else None,add='+')
+            def learning_progress(text):
+                if learning_cancel.is_set():raise ValueError('已取消聊天风格学习。')
+                style_progress.put((window,note,text))
             def analyze_style():
                 ids=[value['samples'][i]['id'] for i in samples.curselection()]
                 if not ids:note.set('先选几条你本人写的消息。');return
@@ -576,11 +582,11 @@ def build_console(platform=None, preview=False):
                 def done(result):
                     if not window.winfo_exists():return
                     draft.delete('1.0','end');draft.insert('1.0',result['style'])
-                    note.set('已分析 %s 条本人样本。请检查、修改下面的规则，然后应用。'%result['samples'])
+                    note.set('已分析 %s 条本人样本，共 %s 批。请检查、修改规则后应用。'%(result['samples'],result.get('batches',1)))
                     analyze_button.configure(state='normal');apply_button.configure(state='normal')
                 def failed(message):
                     if window.winfo_exists():note.set(message);analyze_button.configure(state='normal')
-                task(lambda:platform.style_learning_analyze(value['token'],ids),done,failed)
+                task(lambda:platform.style_learning_analyze(value['token'],ids,learning_progress),done,failed)
             analyze_button=ttk.Button(controls,text='分析选中样本',command=analyze_style);analyze_button.pack(side='left',padx=8)
         task(lambda:platform.style_learning_preview(target,days),show_samples)
     button(style_row,'学习我和这个人的聊天方式',learn_my_style)
@@ -833,6 +839,11 @@ def build_console(platform=None, preview=False):
     qr_stamp=None
     def poll():
         nonlocal busy, qr_stamp, health_busy
+        try:
+            while True:
+                window,note,text=style_progress.get_nowait()
+                if window.winfo_exists():note.set(text)
+        except queue.Empty:pass
         try:
             ok, result, done=events.get_nowait();busy=False;activity.stop();activity.pack_forget()
             for widget in widgets:widget.configure(state='normal')
