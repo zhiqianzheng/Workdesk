@@ -149,3 +149,33 @@ class DesktopConsoleTests(unittest.TestCase):
         self.platform.update_scope.assert_called_with(False,['b'])
         ui['scope_query'].set('');self.app.update()
         self.assertTrue(ui['selection'].get(1).startswith('☑'))
+
+    def test_memory_has_independent_target_empty_guidance_and_optional_advanced_settings(self):
+        self.platform.conversation_memory=Mock(return_value={'enabled':True,'items':[]})
+        ui=self.app.console
+        ui['memory_action']()
+        self.platform.conversation_memory.assert_called_with('filehelper',None,None)
+        self.assertIn('还没有记忆',ui['memory_hint'].get())
+        self.assertFalse(ui['memory_advanced'].winfo_manager())
+        ui['toggle_memory_advanced']()
+        self.assertTrue(ui['memory_advanced'].winfo_manager())
+        ui['toggle_memory_advanced']()
+        self.assertFalse(ui['memory_advanced'].winfo_manager())
+        self.platform.conversation_memory.return_value={'enabled':False,'items':[]}
+        ui['memory_action']('disable')
+        self.assertIn('记忆已关闭',ui['memory_state'].get())
+        self.assertIn('无需保存',ui['status'].get())
+
+    def test_report_can_be_reopened_after_console_restart(self):
+        folder=self.platform.root/'private-data/chat-reports'
+        folder.mkdir(parents=True)
+        (folder/'latest.md').write_text('# Saved report',encoding='utf-8')
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        button=next(widget for widget in descendants(self.app) if widget.winfo_class()=='TButton' and widget.cget('text')=='查看上次报告')
+        button.invoke();self.app.update()
+        import tkinter as tk
+        windows=[w for w in self.app.winfo_children() if isinstance(w,tk.Toplevel)]
+        self.assertTrue(any(w.title()=='聊天总结报告' for w in windows))

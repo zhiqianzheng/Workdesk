@@ -84,6 +84,7 @@ def build_console(platform=None, preview=False):
     style.configure('Horizontal.TProgressbar', background=TEAL, troughcolor=BG, borderwidth=0)
     events = queue.Queue()
     health_events = queue.Queue()
+    style_progress = queue.Queue()
     health_busy = False
     cached_connection = {}
     owner_edited = False
@@ -318,6 +319,9 @@ def build_console(platform=None, preview=False):
         nonlocal contacts, scope_ready
         scope_ready=False
         contacts=items
+        report_choose.configure(values=['我的个人助手（文件传输助手）']+[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id']) for item in contacts])
+        memory_choose.configure(values=['我的个人助手（文件传输助手）']+[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id']) for item in contacts])
+        profile_choose.configure(values=[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'])+' · '+item['id'] for item in contacts])
         render_scope()
         status.set('已刷新接管对象，点击会话即可选择，修改即时生效。')
     scope_ready = True
@@ -407,6 +411,337 @@ def build_console(platform=None, preview=False):
     button(ai_actions, '保存配置', save)
     button(ai_actions, '保存并开启 / 恢复 AI', start, 'Primary.TButton')
     button(ai_actions, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])), 'Danger.TButton')
+    personal = card(pages[1], '联系人风格与长期备注', '在此选择联系人再点读取，不改变接管勾选。独立规则即时保存；长期备注由你维护。')
+    profile_target = tk.StringVar(master=app, value='尚未选择联系人')
+    profile_thread = [None]
+    profile_choose=ttk.Combobox(personal,textvariable=profile_target,state='readonly')
+    profile_choose.pack(fill='x')
+    profile_choose.bind('<<ComboboxSelected>>',lambda event: profile_thread.__setitem__(0,None))
+    profile_mode = tk.StringVar(master=app,value='自动回复')
+    mode_names={'自动回复':'auto','先审核文字':'review','不回复':'off'}
+    profile_mode_box=ttk.Combobox(personal,textvariable=profile_mode,values=list(mode_names),state='readonly')
+    profile_mode_box.pack(anchor='w',pady=5)
+    ttk.Label(personal,text='独立风格',style='Muted.TLabel').pack(anchor='w')
+    profile_style=ttk.Entry(personal);profile_style.pack(fill='x');widgets.append(profile_style)
+    ttk.Label(personal,text='长期备注（可随时修改或清空）',style='Muted.TLabel').pack(anchor='w')
+    profile_memory=ttk.Entry(personal);profile_memory.pack(fill='x');widgets.append(profile_memory)
+    def read_profile():
+        index=profile_choose.current()
+        if index<0 or index>=len(contacts):status.set('请先刷新联系人并在此选择对象。');return
+        item=contacts[index];profile_thread[0]=item['id']
+        memory_action(thread=item['id'])
+        try:value=platform.conversation_profile(item['id'])
+        except ValueError as error:status.set(str(error));return
+        profile_style.delete(0,'end');profile_style.insert(0,value.get('style',''))
+        profile_memory.delete(0,'end');profile_memory.insert(0,value.get('memory',''))
+        profile_mode.set(next((k for k,v in mode_names.items() if v==value.get('mode','auto')),'自动回复'))
+    def save_profile_ui():
+        if not profile_thread[0]:status.set('请先读取一个联系人的规则。');return
+        try:status.set(platform.conversation_profile(profile_thread[0],dict(style=profile_style.get(),memory=profile_memory.get(),mode=mode_names[profile_mode.get()])))
+        except ValueError as error:status.set(str(error))
+    profile_buttons=ttk.Frame(personal,style='Card.TFrame');profile_buttons.pack(fill='x',pady=6)
+    button(profile_buttons,'读取选中联系人规则',read_profile)
+    button(profile_buttons,'即时保存联系人规则',save_profile_ui)
+    memory_card=card(pages[1],'聊天记忆','助手会记住接管聊天中的新文字，以后聊到相关事情时自动参考。你不用手动整理，也不用填写模型。')
+    memory_target=['filehelper']
+    memory_name=tk.StringVar(master=app,value='我的个人助手（文件传输助手）')
+    choose_row=ttk.Frame(memory_card,style='Card.TFrame');choose_row.pack(fill='x',pady=(0,8))
+    ttk.Label(choose_row,text='查看谁的记忆',style='Card.TLabel').pack(side='left',padx=(0,8))
+    memory_choose=ttk.Combobox(choose_row,textvariable=memory_name,state='readonly',values=['我的个人助手（文件传输助手）'])
+    memory_choose.pack(side='left',fill='x',expand=True);memory_choose.current(0)
+    memory_state=tk.StringVar(master=app,value='选择对象后，即可查看记忆。')
+    ttk.Label(memory_card,textvariable=memory_state,style='Card.TLabel').pack(anchor='w',pady=4)
+    memory_hint=tk.StringVar(master=app,value='')
+    ttk.Label(memory_card,textvariable=memory_hint,style='Muted.TLabel',wraplength=660).pack(anchor='w',pady=4)
+    memory_box=ttk.Frame(memory_card,style='Card.TFrame');memory_box.pack(fill='x',pady=5)
+    memory_list=tk.Listbox(memory_box,height=5,exportselection=False)
+    memory_list.pack(side='left',fill='x',expand=True)
+    memory_scroll=ttk.Scrollbar(memory_box,orient='vertical',command=memory_list.yview)
+    memory_scroll.pack(side='right',fill='y');memory_list.configure(yscrollcommand=memory_scroll.set)
+    memory_detail=tk.StringVar(master=app,value='')
+    detail_label=ttk.Label(memory_card,textvariable=memory_detail,style='Card.TLabel',wraplength=660)
+    detail_label.pack(anchor='w',pady=4)
+    memory_box.pack_forget()
+    memory_rows=[]
+    memory_on=[True]
+    def show_memory(event=None):
+        indices=memory_list.curselection()
+        delete_memory.configure(state='normal' if indices else 'disabled')
+        if indices:
+            row=memory_rows[indices[0]]
+            memory_detail.set('收到时间：'+row['stamp']+'\n'+row['text'])
+    memory_list.bind('<<ListboxSelect>>',show_memory)
+    def memory_action(action=None,thread=None):
+        nonlocal memory_rows
+        if thread:
+            memory_target[0]=thread
+            memory_name.set('我的个人助手（文件传输助手）' if thread=='filehelper' else next((item.get('remark') or item.get('displayName') or item.get('nickname') or thread for item in contacts if item['id']==thread),thread))
+        target=memory_target[0]
+        identifier=None
+        if action=='delete':
+            indices=memory_list.curselection()
+            if not indices:return
+            identifier=memory_rows[indices[0]]['message']
+        if action=='clear':
+            from tkinter import messagebox
+            if not messagebox.askyesno('清空聊天记忆','清空“'+memory_name.get()+'”的全部记忆？清空前的旧消息不会自动学回来；主动导入历史时可重新学习。',parent=app):return
+        try:
+            result=platform.conversation_memory(target,action,identifier)
+            memory_on[0]=result['enabled'];memory_rows=result['items']
+            memory_list.delete(0,'end');memory_detail.set('')
+            if memory_rows:memory_box.pack(fill='x',pady=5,before=detail_label)
+            else:memory_box.pack_forget()
+            for row in memory_rows:memory_list.insert('end',row['text'].replace('\n',' ')[:70])
+            memory_state.set(('● 记忆已开启' if result['enabled'] else '○ 记忆已关闭')+' · 已记住 %s 条'%len(memory_rows))
+            if result['enabled']:
+                memory_hint.set('还没有记忆。助手处理此对象的新文字后会自动记住，再点“刷新”查看；不会自动导入旧记录，可用下方“预览并学习历史”补充。' if not memory_rows else '点击一条可查看原话。回复时会自动参考相关记忆，不需要你手动选择。')
+            else:memory_hint.set('已停止记住和参考此对象的聊天；原有记忆保留，可删除或重新开启。')
+            if target=='filehelper':memory_hint.set(memory_hint.get()+' 个人助手需保持开启。')
+            else:memory_hint.set(memory_hint.get()+' 好友/群聊需在接管范围内且 AI 已开启。')
+            toggle_memory.configure(text='关闭此对象的记忆' if result['enabled'] else '开启此对象的记忆')
+            delete_memory.configure(state='disabled');clear_memory.configure(state='normal' if memory_rows else 'disabled')
+            status.set('已删除选中记忆。' if action=='delete' else '已清空当前对象记忆。' if action=='clear' else '记忆设置已即时生效，无需保存。' if action else '记忆已刷新。')
+        except (ValueError,OSError) as error:memory_hint.set('读取失败：'+str(error))
+    def choose_memory(event=None):
+        index=memory_choose.current()
+        if index==0:memory_action(thread='filehelper')
+        elif 0<index<=len(contacts):memory_action(thread=contacts[index-1]['id'])
+    memory_choose.bind('<<ComboboxSelected>>',choose_memory)
+    memory_buttons=ttk.Frame(memory_card,style='Card.TFrame');memory_buttons.pack(fill='x',pady=5)
+    button(memory_buttons,'刷新',lambda:memory_action())
+    toggle_memory=button(memory_buttons,'关闭此对象的记忆',lambda:memory_action('disable' if memory_on[0] else 'enable'))
+    delete_memory=button(memory_buttons,'删除选中记忆',lambda:memory_action('delete'));delete_memory.configure(state='disabled')
+    clear_memory=button(memory_buttons,'清空此对象记忆',lambda:memory_action('clear'));clear_memory.configure(state='disabled')
+    ttk.Label(memory_card,text='开关与删除立即生效，无需再点保存。每个对象最多保留500条、90天。',style='Muted.TLabel').pack(anchor='w',pady=(3,8))
+    history_row=ttk.Frame(memory_card,style='Card.TFrame');history_row.pack(fill='x',pady=(8,3))
+    ttk.Label(history_row,text='从以前的聊天学习',style='Card.TLabel').pack(side='left',padx=(0,8))
+    history_days=tk.StringVar(master=app,value='最近30天')
+    history_range=ttk.Combobox(history_row,textvariable=history_days,values=['最近7天','最近30天','最近90天'],state='readonly',width=10)
+    history_range.pack(side='left')
+    def preview_history():
+        target=memory_target[0]
+        days={'最近7天':7,'最近30天':30,'最近90天':90}[history_days.get()]
+        def show_preview(result):
+            if not result['count']:
+                memory_hint.set('没有读到这个时间范围内可学习的文字。只能读取本机后台已同步的记录，不代表手机里没有历史。');return
+            from tkinter import messagebox
+            details='对象：'+result['name']+'\n可读取文字：%s 条（最多500条）'%result['count']
+            if result['limited']:details+='\n记录较多，本次仅预览已读取部分。'
+            details+='\n\n最近原话预览：\n'+'\n'.join(result['examples'][:5])
+            details+='\n\n继续后会向已配置的 API 提交部分原话，由 AI 提取记忆；并建立原话检索。不会发送微信消息，不会开启自动回复。是否开始？'
+            if not messagebox.askyesno('预览历史学习',details,parent=app):return
+            def imported(value):
+                memory_action(thread=target)
+                memory_hint.set('已处理 %s 条原话，AI 阅读其中 %s 条并提取 %s 条记忆；重复记录自动跳过。'%(value['originals'],value['sampled'],value['summaries']))
+            app.after(10,lambda:task(lambda:platform.history_memory_import(result['token']),imported))
+        task(lambda:platform.history_memory_preview(target,days),show_preview)
+    button(history_row,'预览并学习历史',preview_history)
+    ttk.Label(memory_card,text='只读取本机已同步的历史；先预览再学习，不会给对方发消息。',style='Muted.TLabel',wraplength=660).pack(anchor='w',pady=(0,6))
+    style_row=ttk.Frame(memory_card,style='Card.TFrame');style_row.pack(fill='x',pady=6)
+    def learn_my_style():
+        target=memory_target[0]
+        if target=='filehelper':status.set('请先在“查看谁的记忆”选择好友或群聊。');return
+        days={'最近7天':7,'最近30天':30,'最近90天':90}[history_days.get()]
+        def show_samples(value):
+            if not value['samples']:status.set('这个范围内没有可供学习的本人发出文字，请换日期范围。');return
+            window=tk.Toplevel(app);window.title('学习我与“'+value['name']+'”的聊天方式');window.geometry('850x720')
+            ttk.Label(window,text='请选择确实是你本人写的消息，取消旧AI回复。仅凭发出方向无法可靠判断作者。',wraplength=790).pack(anchor='w',padx=12,pady=8)
+            samples=tk.Listbox(window,selectmode='multiple',exportselection=False,height=8)
+            samples.pack(fill='x',padx=12)
+            for row in value['samples']:samples.insert('end',row['time']+' · '+row['text'].replace('\n',' ')[:100])
+            from tkinter.scrolledtext import ScrolledText
+            sample_detail=tk.StringVar(master=window,value='点击样本可查看全文；可以选择多条。')
+            sample_view=ScrolledText(window,height=4,wrap='word');sample_view.pack(fill='x',padx=12,pady=5)
+            sample_view.insert('1.0',sample_detail.get());sample_view.configure(state='disabled')
+            def show_sample(event=None):
+                index=samples.index('active')
+                if index<len(value['samples']):
+                    sample_view.configure(state='normal');sample_view.delete('1.0','end');sample_view.insert('1.0',value['samples'][index]['text']);sample_view.configure(state='disabled')
+            samples.bind('<<ListboxSelect>>',show_sample)
+            controls=ttk.Frame(window);controls.pack(fill='x',padx=12)
+            ttk.Button(controls,text='全选本人样本（请核对）',command=lambda:samples.selection_set(0,'end')).pack(side='left')
+            ttk.Button(controls,text='清空选择',command=lambda:samples.selection_clear(0,'end')).pack(side='left')
+            note=tk.StringVar(master=window,value='学习结果会先显示在下面，确认后才用于这个联系人的自动回复。')
+            ttk.Label(window,textvariable=note,wraplength=790).pack(anchor='w',padx=12,pady=6)
+            draft=ScrolledText(window,height=10,wrap='word');draft.pack(fill='both',expand=True,padx=12,pady=6)
+            def apply_style():
+                try:
+                    message=platform.apply_learned_style(target,draft.get('1.0','end').strip())
+                    note.set('已应用：今后回复此对象会参考这个风格。接管范围和启停不变。');status.set(message)
+                except ValueError as error:note.set(str(error))
+            apply_button=ttk.Button(window,text='应用这个风格（即时生效）',command=apply_style,state='disabled');apply_button.pack(pady=6)
+            learning_cancel=threading.Event()
+            window.bind('<Destroy>',lambda event:learning_cancel.set() if event.widget is window else None,add='+')
+            def learning_progress(text):
+                if learning_cancel.is_set():raise ValueError('已取消聊天风格学习。')
+                style_progress.put((window,note,text))
+            def analyze_style():
+                ids=[value['samples'][i]['id'] for i in samples.curselection()]
+                if not ids:note.set('先选几条你本人写的消息。');return
+                analyze_button.configure(state='disabled');apply_button.configure(state='disabled');note.set('AI正在分析你的表达习惯…')
+                def done(result):
+                    if not window.winfo_exists():return
+                    draft.delete('1.0','end');draft.insert('1.0',result['style'])
+                    note.set('已分析 %s 条本人样本，共 %s 批。请检查、修改规则后应用。'%(result['samples'],result.get('batches',1)))
+                    analyze_button.configure(state='normal');apply_button.configure(state='normal')
+                def failed(message):
+                    if window.winfo_exists():note.set(message);analyze_button.configure(state='normal')
+                task(lambda:platform.style_learning_analyze(value['token'],ids,learning_progress),done,failed)
+            analyze_button=ttk.Button(controls,text='分析选中样本',command=analyze_style);analyze_button.pack(side='left',padx=8)
+        task(lambda:platform.style_learning_preview(target,days),show_samples)
+    button(style_row,'学习我和这个人的聊天方式',learn_my_style)
+    ttk.Label(memory_card,text='沿用上方日期范围。选择你的真实回复作为样本，预览并应用专属风格；不是单纯保存聊天原话。',style='Muted.TLabel',wraplength=660).pack(anchor='w')
+    advanced=ttk.Frame(memory_card,style='Card.TFrame')
+    def toggle_memory_advanced():
+        if advanced.winfo_manager():advanced.pack_forget();advanced_button.configure(text='高级设置（可选） ▸')
+        else:advanced.pack(fill='x',pady=5);advanced_button.configure(text='收起高级设置 ▾')
+    advanced_button=button(memory_card,'高级设置（可选） ▸',toggle_memory_advanced)
+    ttk.Label(advanced,text='默认本地检索已可使用。仅当你的 API 提供 Embedding 模型时填写下项；启用后会把相关聊天文字提交给该 API。',style='Muted.TLabel',wraplength=660).pack(anchor='w')
+    embedding_entry=ttk.Entry(advanced);embedding_entry.pack(fill='x',pady=5)
+    if not preview:embedding_entry.insert(0,platform.memory_embedding())
+    def save_embedding():
+        try:status.set(platform.memory_embedding(embedding_entry.get()))
+        except ValueError as error:status.set(str(error))
+    button(advanced,'保存高级检索设置',save_embedding)
+    if not preview:app.after(100,lambda:memory_action())
+    report_card=card(pages[2],'聊天总结报告','选择联系人或群聊，读取指定范围后生成 AI 报告。不会发送微信消息，也不会修改接管或记忆设置。')
+    report_choose=ttk.Combobox(report_card,state='readonly',values=['我的个人助手（文件传输助手）'])
+    report_choose.pack(fill='x');report_choose.current(0)
+    report_refresh_row=ttk.Frame(report_card,style='Card.TFrame');report_refresh_row.pack(fill='x',pady=(4,0))
+    button(report_refresh_row,'刷新联系人列表',lambda:task(platform.contacts,show_contacts))
+    report_mode=tk.StringVar(master=app,value='日期范围')
+    report_mode_box=ttk.Combobox(report_card,textvariable=report_mode,state='readonly',values=['日期范围','最近消息条数','全部已同步记录'])
+    report_mode_box.pack(anchor='w',pady=5)
+    from datetime import date,timedelta
+    ttk.Label(report_card,text='开始日期',style='Card.TLabel').pack(anchor='w')
+    report_start=ttk.Entry(report_card);report_start.insert(0,str(date.today()-timedelta(days=7)));report_start.pack(fill='x')
+    ttk.Label(report_card,text='结束日期',style='Card.TLabel').pack(anchor='w')
+    report_end=ttk.Entry(report_card);report_end.insert(0,str(date.today()));report_end.pack(fill='x',pady=4)
+    ttk.Label(report_card,text='开始日期 / 结束日期：YYYY-MM-DD，包含结束日，按本机时区。',style='Muted.TLabel').pack(anchor='w')
+    ttk.Label(report_card,text='最近消息条数',style='Card.TLabel').pack(anchor='w')
+    report_count=ttk.Entry(report_card);report_count.insert(0,'1000');report_count.pack(fill='x',pady=4)
+    ttk.Label(report_card,text='条数填写正整数，无预设上限；全部记录模式不需要填条数。只读取本机已同步记录，图片/语音/视频仅标注类型。消息越多处理越久，可取消。',style='Muted.TLabel',wraplength=660).pack(anchor='w')
+    report_note=tk.StringVar(master=app,value='尚未生成报告。')
+    ttk.Label(report_card,textvariable=report_note,style='Card.TLabel',wraplength=660).pack(anchor='w',pady=6)
+    report_job={'running':False,'cancel':threading.Event(),'result':None}
+    report_events=queue.Queue()
+    def report_fields(*args):
+        report_start.configure(state='normal' if report_mode.get()=='日期范围' else 'disabled')
+        report_end.configure(state='normal' if report_mode.get()=='日期范围' else 'disabled')
+        report_count.configure(state='normal' if report_mode.get()=='最近消息条数' else 'disabled')
+    report_mode.trace_add('write',report_fields);report_fields()
+    def show_report():
+        result=report_job['result']
+        if not result:
+            folder=platform.root/'private-data/chat-reports'
+            saved=sorted(folder.glob('*.md'),key=lambda path:path.stat().st_mtime,reverse=True) if folder.exists() else []
+            if not saved:report_note.set('还没有已完成的报告。');return
+            try:result={'text':saved[0].read_text(encoding='utf-8'),'path':str(saved[0])}
+            except OSError:report_note.set('无法读取上次报告。');return
+            report_job['result']=result
+        window=tk.Toplevel(app);window.title('聊天总结报告');window.geometry('850x650')
+        from tkinter.scrolledtext import ScrolledText
+        body=ScrolledText(window,wrap='word',font=(family,10));body.pack(fill='both',expand=True,padx=12,pady=12)
+        body.insert('1.0',result['text']);body.configure(state='disabled')
+        for sequence in ('<MouseWheel>','<Button-4>','<Button-5>'):
+            body.bind(sequence,lambda event:(body.yview_scroll(wheel_units(event),'units'),'break')[1])
+        def export():
+            from tkinter import filedialog
+            path=filedialog.asksaveasfilename(parent=window,title='导出总结报告',defaultextension='.md',filetypes=[('Markdown报告','*.md'),('文字文件','*.txt')])
+            if path:
+                try:Path(path).write_text(result['text'],encoding='utf-8');report_note.set('报告已导出。')
+                except OSError:report_note.set('导出失败，请检查保存位置。')
+        ttk.Button(window,text='导出报告',command=export).pack(pady=(0,10))
+    def start_report():
+        if report_job['running']:return
+        index=report_choose.current()
+        if index<0 or index>len(contacts):report_note.set('请先选择联系人或群聊。');return
+        target='filehelper' if index==0 else contacts[index-1]['id']
+        chosen={'日期范围':'date','最近消息条数':'count','全部已同步记录':'all'}[report_mode.get()]
+        try:
+            amount=int(report_count.get()) if chosen=='count' else None
+            if chosen=='count' and amount<=0:raise ValueError()
+        except ValueError:report_note.set('消息条数请填写正整数。');return
+        first,last=report_start.get(),report_end.get()
+        if chosen=='date':
+            from chat_report import date_window
+            try:date_window(first,last)
+            except ValueError as error:report_note.set(str(error));return
+        report_job['running']=True;report_job['cancel'].clear()
+        report_note.set('开始读取记录…');report_start_button.configure(state='disabled');report_cancel_button.configure(state='normal')
+        def run_report():
+            try:
+                value=platform.chat_summary_report(target,chosen,first,last,amount,lambda text:report_events.put(('progress',text)),report_job['cancel'].is_set)
+                report_events.put(('done',value))
+            except Exception as error:
+                kind=type(error).__name__
+                # Persist stack locations only: no chat text, credentials or provider bodies.
+                import traceback
+                try:
+                    frames=[{'file':Path(frame.filename).name,'line':frame.lineno,'function':frame.name} for frame in traceback.extract_tb(error.__traceback__)]
+                    diagnostic=platform.root/'private-data/report-last-error.json'
+                    diagnostic.write_text(json.dumps({'type':kind,'frames':frames}),encoding='utf-8');diagnostic.chmod(0o600)
+                except OSError:pass
+                report_events.put(('error',str(error) if isinstance(error,ValueError) else '生成遇到内部错误（'+kind+'），诊断已保存。不是已确认的微信断线或API故障。'))
+        threading.Thread(target=run_report,daemon=True).start()
+        poll_report()
+    def poll_report():
+        try:
+            while True:
+                kind,value=report_events.get_nowait()
+                if kind=='progress':report_note.set(value)
+                else:
+                    report_job['running']=False;report_start_button.configure(state='normal');report_cancel_button.configure(state='disabled')
+                    if kind=='done':report_job['result']=value;report_note.set('报告完成，共处理 %s 条消息。'%value['count']);show_report()
+                    else:report_note.set(value)
+        except queue.Empty:pass
+        if report_job['running']:report_job['after']=app.after(150,poll_report)
+    def close_report_job(event):
+        if event.widget is app:
+            report_job['cancel'].set()
+            if report_job.get('after'):
+                try:app.after_cancel(report_job['after'])
+                except tk.TclError:pass
+    app.bind('<Destroy>',close_report_job,add='+')
+    report_actions=ttk.Frame(report_card,style='Card.TFrame');report_actions.pack(fill='x')
+    report_start_button=button(report_actions,'读取并生成报告',start_report)
+    report_cancel_button=button(report_actions,'取消生成',lambda:(report_job['cancel'].set(),report_note.set('正在取消，当前网络请求结束后停止…')));report_cancel_button.configure(state='disabled')
+    button(report_actions,'查看上次报告',show_report)
+    review = card(pages[2], '待审核文字回复', '只显示最近 24 小时的草稿。批准后由后台复核范围再发送；未知发送结果不会自动重试。')
+    review_list=tk.Listbox(review,height=5,exportselection=False);review_list.pack(fill='x')
+    review_rows=[]
+    draft_text=tk.StringVar(master=app)
+    draft_editor=ttk.Entry(review,textvariable=draft_text)
+    draft_editor.pack(fill='x',pady=5)
+    def show_review(event=None):
+        indices=review_list.curselection()
+        if indices:draft_text.set(review_rows[indices[0]]['text'])
+    review_list.bind('<<ListboxSelect>>',show_review)
+    def refresh_reviews():
+        nonlocal review_rows
+        review_rows=platform.review_drafts();review_list.delete(0,'end')
+        for row in review_rows:review_list.insert('end',row['thread']+' · '+row['state']+' · '+row['text'])
+        if not review_rows:status.set('暂无待审核草稿。')
+    def decide_review(approved):
+        indices=review_list.curselection()
+        if not indices:status.set('请先选择草稿。');return
+        try:status.set(platform.review_drafts(review_rows[indices[0]]['key'],approved,text=draft_text.get() if approved else None))
+        except ValueError as error:status.set(str(error))
+        refresh_reviews()
+    review_buttons=ttk.Frame(review,style='Card.TFrame');review_buttons.pack(fill='x')
+    button(review_buttons,'刷新草稿',refresh_reviews)
+    button(review_buttons,'批准发送当前文字',lambda:decide_review(True))
+    button(review_buttons,'丢弃草稿',lambda:decide_review(False))
+    recovery=card(pages[2],'本机偏好备份与恢复','备份范围和风格、联系人备注；不含密钥、登录态或消息队列。恢复前会自动另存当前偏好，需要先停止两个助手。')
+    backup_name=tk.StringVar(master=app)
+    ttk.Entry(recovery,textvariable=backup_name).pack(fill='x')
+    button(recovery,'创建本机快照',lambda:task(platform.backup_settings,lambda value:status.set(value)))
+    def restore_preferences():
+        from tkinter import messagebox
+        if not backup_name.get().strip():status.set('请填写本机快照的完整路径。');return
+        if messagebox.askyesno('恢复偏好','恢复所选快照中的范围、风格和联系人备注？当前偏好会先备份。',parent=app):
+            name=backup_name.get().strip();task(lambda:platform.backup_settings(name),lambda value:status.set(value))
+    button(recovery,'校验并恢复偏好',restore_preferences)
     trial = card(pages[1], '试聊预览', '使用已保存的 API 和风格测试一条虚构消息，只显示在这里，不发微信、不调用图片或联网工具。修改风格后请先保存。')
     trial_input = ttk.Entry(trial)
     trial_input.pack(fill='x', pady=(0,6));widgets.append(trial_input)
@@ -505,6 +840,11 @@ def build_console(platform=None, preview=False):
     def poll():
         nonlocal busy, qr_stamp, health_busy
         try:
+            while True:
+                window,note,text=style_progress.get_nowait()
+                if window.winfo_exists():note.set(text)
+        except queue.Empty:pass
+        try:
             ok, result, done=events.get_nowait();busy=False;activity.stop();activity.pack_forget()
             for widget in widgets:widget.configure(state='normal')
             language_box.configure(state='readonly')
@@ -565,9 +905,17 @@ def build_console(platform=None, preview=False):
         fields['model'].bind(sequence, lambda event: 'break')
         language_box.bind(sequence, lambda event: 'break')
         kind_box.bind(sequence, lambda event: 'break')
+        profile_mode_box.bind(sequence, lambda event: 'break')
+        profile_choose.bind(sequence, lambda event: 'break')
+        memory_choose.bind(sequence, lambda event: 'break')
+        history_range.bind(sequence, lambda event: 'break')
+        report_choose.bind(sequence, lambda event: 'break')
+        report_mode_box.bind(sequence, lambda event: 'break')
+        memory_list.bind(sequence,lambda event:(memory_list.yview_scroll(wheel_units(event),'units'),'break')[1])
+        review_list.bind(sequence, lambda event: (review_list.yview_scroll(wheel_units(event),'units'), 'break')[1])
         app.bind(sequence, wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
-                       consent=consent, start=start, save=save, canvases=canvases, selection=selection, show_contacts=show_contacts, scope_note=scope_note, set_entire_scope=set_entire_scope, scope_query=scope_query, scope_kind=scope_kind, scope_selected_only=scope_selected_only,
+                       consent=consent, start=start, save=save, canvases=canvases, selection=selection, show_contacts=show_contacts, scope_note=scope_note, set_entire_scope=set_entire_scope, memory_action=memory_action, memory_choose=memory_choose, memory_hint=memory_hint, memory_state=memory_state, memory_advanced=advanced, toggle_memory_advanced=toggle_memory_advanced, scope_query=scope_query, scope_kind=scope_kind, scope_selected_only=scope_selected_only,
                        webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats, videoAnalysis=video_analysis, voiceReplies=voice_replies, ownerAssistant=owner_dialog)
     app.console.update(apply_health=show_health, connection_buttons=controls, badge=badge)
     if preview:

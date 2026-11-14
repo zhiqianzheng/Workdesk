@@ -185,6 +185,87 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def chat_summary_report(self,thread,mode,start='',end='',count=None,progress=lambda value:None,cancel=lambda:False):
+        import chat_report
+        if not self.account:raise ValueError('请先连接微信。')
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:return chat_report.run(self.root,config,connection,thread,mode,start,end,count,progress,cancel)
+        finally:connection.close()
+
+    def style_learning_preview(self,thread,days):
+        import memory_history,uuid
+        if thread=='filehelper':raise ValueError('请为好友或群聊学习你的回复风格，个人助手使用任务助理风格。')
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:data=memory_history.preview(connection,self.account,thread,days,include_outgoing=True)
+        finally:connection.close()
+        token=uuid.uuid4().hex;self._style_preview=(token,data)
+        from conversation_style import redact
+        return {'token':token,'name':data['name'],'limited':data['limited'],'samples':[{'id':r['id'],'text':redact(r['body']),'time':r['createdAt']} for r in data['rows'] if r.get('direction')=='outgoing']}
+
+    def style_learning_analyze(self,token,selected,progress=lambda value:None):
+        import conversation_style
+        cached=getattr(self,'_style_preview',None)
+        if not cached or cached[0]!=token:raise ValueError('请先重新读取聊天样本。')
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        return conversation_style.analyze(config,cached[1],selected,progress)
+
+    def apply_learned_style(self,thread,style):
+        if not isinstance(style,str) or not style.strip():raise ValueError('请先分析样本或填写风格规则。')
+        from assistant_profiles import load_profile,save_profile
+        old=load_profile(self.root,thread)
+        return save_profile(self.root,thread,style,old.get('memory',''),old.get('mode','auto'))
+
+    def history_memory_preview(self,thread,days):
+        import memory_history, uuid
+        if not self.account:raise ValueError('请先连接微信。')
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:data=memory_history.preview(connection,self.account,thread,days)
+        finally:connection.close()
+        token=uuid.uuid4().hex
+        self._memory_preview=(token,data)
+        return {'token':token,'name':data['name'],'count':len(data['rows']),'limited':data['limited'],
+                'examples':[r['body'][:160] for r in data['rows'][:10]]}
+
+    def history_memory_import(self,token):
+        import memory_history
+        cached=getattr(self,'_memory_preview',None)
+        if not cached or cached[0]!=token:raise ValueError('请重新预览聊天记录。')
+        self._memory_preview=None
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        return memory_history.import_preview(self.root,config,cached[1])
+
+    def memory_embedding(self,model=None):
+        path=self.root/'private-data/workdesk-native-ai.json'
+        if model is None:return json.loads(path.read_text(encoding='utf-8')).get('memoryEmbeddingModel','')
+        if not isinstance(model,str) or len(model)>120 or any(ord(x)<32 for x in model):raise ValueError('Embedding模型ID无效。')
+        with edit_config(path) as config:config['memoryEmbeddingModel']=model.strip()
+        return 'Embedding设置已保存。留空使用本地词片段向量；接口不支持时退回本地检索。'
+
+    def conversation_memory(self,thread,action=None,message=None):
+        import conversation_memory
+        if not self.account:raise ValueError('请先连接微信账号。')
+        if action:return conversation_memory.manage(self.root,self.account,thread,action,message)
+        return conversation_memory.inspect(self.root,self.account,thread)
+
+    def conversation_profile(self, thread, values=None):
+        from assistant_profiles import load_profile, save_profile
+        if values is None:return load_profile(self.root,thread)
+        return save_profile(self.root,thread,**values)
+
+    def review_drafts(self, key=None, approved=False, text=None):
+        import reply_review
+        if text is not None:reply_review.edit(self.root,key,text)
+        return reply_review.pending(self.root) if key is None else reply_review.decide(self.root,key,approved)
+
+    def backup_settings(self, filename=None):
+        import settings_backup
+        if filename is None:return '本机偏好快照已创建：'+settings_backup.create(self.root)
+        status=self.health()
+        if status.get('enabled') or status.get('ownerAssistant') or status.get('ownerHealth',{}).get('ready'):
+            raise ValueError('恢复前请暂停好友群 AI 并关闭个人助手，等待任务退出。')
+        return settings_backup.restore(self.root,filename)
+
     def preview_reply(self, text):
         if not isinstance(text,str) or not text.strip() or len(text)>4000:
             raise ValueError('请输入 1–4000 字的虚构消息。')
@@ -265,6 +346,7 @@ class Platform:
                 key = config.pop('apiKey')
                 config['encryptedKey'] = protect(key) if key else ''
                 (private / 'global.stop').touch()
+                config['memoryEmbeddingModel']=old.get('memoryEmbeddingModel','')
                 old.clear()
                 old.update(config)
 
