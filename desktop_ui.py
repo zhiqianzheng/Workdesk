@@ -318,6 +318,7 @@ def build_console(platform=None, preview=False):
         nonlocal contacts, scope_ready
         scope_ready=False
         contacts=items
+        report_choose.configure(values=['我的个人助手（文件传输助手）']+[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id']) for item in contacts])
         memory_choose.configure(values=['我的个人助手（文件传输助手）']+[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id']) for item in contacts])
         profile_choose.configure(values=[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'])+' · '+item['id'] for item in contacts])
         render_scope()
@@ -548,6 +549,93 @@ def build_console(platform=None, preview=False):
         except ValueError as error:status.set(str(error))
     button(advanced,'保存高级检索设置',save_embedding)
     if not preview:app.after(100,lambda:memory_action())
+    report_card=card(pages[2],'聊天总结报告','选择联系人或群聊，读取指定范围后生成 AI 报告。不会发送微信消息，也不会修改接管或记忆设置。')
+    report_choose=ttk.Combobox(report_card,state='readonly',values=['我的个人助手（文件传输助手）'])
+    report_choose.pack(fill='x');report_choose.current(0)
+    button(report_card,'刷新联系人列表',lambda:task(platform.contacts,show_contacts))
+    report_mode=tk.StringVar(master=app,value='日期范围')
+    report_mode_box=ttk.Combobox(report_card,textvariable=report_mode,state='readonly',values=['日期范围','最近消息条数','全部已同步记录'])
+    report_mode_box.pack(anchor='w',pady=5)
+    from datetime import date,timedelta
+    ttk.Label(report_card,text='开始日期',style='Card.TLabel').pack(anchor='w')
+    report_start=ttk.Entry(report_card);report_start.insert(0,str(date.today()-timedelta(days=7)));report_start.pack(fill='x')
+    ttk.Label(report_card,text='结束日期',style='Card.TLabel').pack(anchor='w')
+    report_end=ttk.Entry(report_card);report_end.insert(0,str(date.today()));report_end.pack(fill='x',pady=4)
+    ttk.Label(report_card,text='开始日期 / 结束日期：YYYY-MM-DD，包含结束日，按本机时区。',style='Muted.TLabel').pack(anchor='w')
+    ttk.Label(report_card,text='最近消息条数',style='Card.TLabel').pack(anchor='w')
+    report_count=ttk.Entry(report_card);report_count.insert(0,'1000');report_count.pack(fill='x',pady=4)
+    ttk.Label(report_card,text='条数填写正整数，无预设上限；全部记录模式不需要填条数。只读取本机已同步记录，图片/语音/视频仅标注类型。消息越多处理越久，可取消。',style='Muted.TLabel',wraplength=660).pack(anchor='w')
+    report_note=tk.StringVar(master=app,value='尚未生成报告。')
+    ttk.Label(report_card,textvariable=report_note,style='Card.TLabel',wraplength=660).pack(anchor='w',pady=6)
+    report_job={'running':False,'cancel':threading.Event(),'result':None}
+    report_events=queue.Queue()
+    def report_fields(*args):
+        report_start.configure(state='normal' if report_mode.get()=='日期范围' else 'disabled')
+        report_end.configure(state='normal' if report_mode.get()=='日期范围' else 'disabled')
+        report_count.configure(state='normal' if report_mode.get()=='最近消息条数' else 'disabled')
+    report_mode.trace_add('write',report_fields);report_fields()
+    def show_report():
+        result=report_job['result']
+        if not result:return
+        window=tk.Toplevel(app);window.title('聊天总结报告');window.geometry('850x650')
+        from tkinter.scrolledtext import ScrolledText
+        body=ScrolledText(window,wrap='word',font=(family,10));body.pack(fill='both',expand=True,padx=12,pady=12)
+        body.insert('1.0',result['text']);body.configure(state='disabled')
+        for sequence in ('<MouseWheel>','<Button-4>','<Button-5>'):
+            body.bind(sequence,lambda event:(body.yview_scroll(wheel_units(event),'units'),'break')[1])
+        def export():
+            from tkinter import filedialog
+            path=filedialog.asksaveasfilename(parent=window,title='导出总结报告',defaultextension='.md',filetypes=[('Markdown报告','*.md'),('文字文件','*.txt')])
+            if path:
+                try:Path(path).write_text(result['text'],encoding='utf-8');report_note.set('报告已导出。')
+                except OSError:report_note.set('导出失败，请检查保存位置。')
+        ttk.Button(window,text='导出报告',command=export).pack(pady=(0,10))
+    def start_report():
+        if report_job['running']:return
+        index=report_choose.current()
+        if index<0 or index>len(contacts):report_note.set('请先选择联系人或群聊。');return
+        target='filehelper' if index==0 else contacts[index-1]['id']
+        chosen={'日期范围':'date','最近消息条数':'count','全部已同步记录':'all'}[report_mode.get()]
+        try:
+            amount=int(report_count.get()) if chosen=='count' else None
+            if chosen=='count' and amount<=0:raise ValueError()
+        except ValueError:report_note.set('消息条数请填写正整数。');return
+        first,last=report_start.get(),report_end.get()
+        if chosen=='date':
+            from chat_report import date_window
+            try:date_window(first,last)
+            except ValueError as error:report_note.set(str(error));return
+        report_job['running']=True;report_job['cancel'].clear()
+        report_note.set('开始读取记录…');report_start_button.configure(state='disabled');report_cancel_button.configure(state='normal')
+        def run_report():
+            try:
+                value=platform.chat_summary_report(target,chosen,first,last,amount,lambda text:report_events.put(('progress',text)),report_job['cancel'].is_set)
+                report_events.put(('done',value))
+            except Exception as error:report_events.put(('error',str(error) if isinstance(error,ValueError) else '生成失败，请检查微信连接或 API 后重试。'))
+        threading.Thread(target=run_report,daemon=True).start()
+        poll_report()
+    def poll_report():
+        try:
+            while True:
+                kind,value=report_events.get_nowait()
+                if kind=='progress':report_note.set(value)
+                else:
+                    report_job['running']=False;report_start_button.configure(state='normal');report_cancel_button.configure(state='disabled')
+                    if kind=='done':report_job['result']=value;report_note.set('报告完成，共处理 %s 条消息。'%value['count']);show_report()
+                    else:report_note.set(value)
+        except queue.Empty:pass
+        if report_job['running']:report_job['after']=app.after(150,poll_report)
+    def close_report_job(event):
+        if event.widget is app:
+            report_job['cancel'].set()
+            if report_job.get('after'):
+                try:app.after_cancel(report_job['after'])
+                except tk.TclError:pass
+    app.bind('<Destroy>',close_report_job,add='+')
+    report_actions=ttk.Frame(report_card,style='Card.TFrame');report_actions.pack(fill='x')
+    report_start_button=button(report_actions,'读取并生成报告',start_report)
+    report_cancel_button=button(report_actions,'取消生成',lambda:(report_job['cancel'].set(),report_note.set('正在取消，当前网络请求结束后停止…')));report_cancel_button.configure(state='disabled')
+    button(report_actions,'查看上次报告',show_report)
     review = card(pages[2], '待审核文字回复', '只显示最近 24 小时的草稿。批准后由后台复核范围再发送；未知发送结果不会自动重试。')
     review_list=tk.Listbox(review,height=5,exportselection=False);review_list.pack(fill='x')
     review_rows=[]
@@ -745,6 +833,8 @@ def build_console(platform=None, preview=False):
         profile_choose.bind(sequence, lambda event: 'break')
         memory_choose.bind(sequence, lambda event: 'break')
         history_range.bind(sequence, lambda event: 'break')
+        report_choose.bind(sequence, lambda event: 'break')
+        report_mode_box.bind(sequence, lambda event: 'break')
         memory_list.bind(sequence,lambda event:(memory_list.yview_scroll(wheel_units(event),'units'),'break')[1])
         review_list.bind(sequence, lambda event: (review_list.yview_scroll(wheel_units(event),'units'), 'break')[1])
         app.bind(sequence, wheel)

@@ -185,6 +185,14 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def chat_summary_report(self,thread,mode,start='',end='',count=None,progress=lambda value:None,cancel=lambda:False):
+        import chat_report
+        if not self.account:raise ValueError('请先连接微信。')
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:return chat_report.run(self.root,config,connection,thread,mode,start,end,count,progress,cancel)
+        finally:connection.close()
+
     def history_memory_preview(self,thread,days):
         import memory_history, uuid
         if not self.account:raise ValueError('请先连接微信。')
