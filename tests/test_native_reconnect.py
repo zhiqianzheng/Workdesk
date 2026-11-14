@@ -33,7 +33,8 @@ class DirectoryTests(unittest.TestCase):
         self.assertTrue(result['authenticated'])
         self.assertTrue(result['directoryLoading'])
         self.assertEqual(len(result['sessions']), 1)
-        self.assertEqual(self.connection.request.call_count, 4)
+        self.assertEqual(self.connection.request.call_count, 3)
+        self.assertNotIn('threads/first', [call.args[0] for call in self.connection.request.call_args_list])
 
     def test_later_page_keeps_previously_loaded_contacts(self):
         self.connection.request = Mock(side_effect=[

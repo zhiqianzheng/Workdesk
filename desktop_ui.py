@@ -251,15 +251,75 @@ def build_console(platform=None, preview=False):
     selection.pack(side='left', fill='both', expand=True)
     scroll = ttk.Scrollbar(list_frame, orient='vertical', command=selection.yview)
     scroll.pack(side='right', fill='y');selection.configure(yscrollcommand=scroll.set);widgets.append(selection)
+    scope_ready = False
+    scope_note = tk.StringVar(value='当前接管全部好友和普通群聊' if all_chats.get() else '当前已选择 %s 个会话' % len(saved.get('contacts', [])))
+    ttk.Label(scope, textvariable=scope_note, style='Card.TLabel').pack(anchor='w', pady=(4, 2))
+    def render_scope():
+        nonlocal scope_ready
+        scope_ready=False
+        top=selection.yview()[0]
+        selection.delete(0, 'end')
+        for i, item in enumerate(contacts):
+            checked=all_chats.get() or item['id'] in saved.get('contacts', [])
+            name=item.get('remark') or item.get('displayName') or item.get('nickname') or item['id']
+            selection.insert('end', ('☑  ' if checked else '☐  ') + name)
+            if checked:selection.selection_set(i)
+        selection.yview_moveto(top)
+        scope_ready=True
+    ttk.Label(scope, text='点击会话可逐个选择或取消，立即生效；取消全部选择后不回复好友和群聊。', style='Muted.TLabel').pack(anchor='w')
+    def apply_scope(event=None):
+        if not scope_ready:
+            return
+        ids = [contacts[i]['id'] for i in selection.curselection()] if contacts else saved.get('contacts', [])
+        if event is not None:
+            expected = {item['id'] for item in contacts} if all_chats.get() else set(saved.get('contacts', [])) & {item['id'] for item in contacts}
+            if set(ids) == expected:
+                return
+            all_chats.set(False)
+        try:
+            result = platform.update_scope(all_chats.get(), ids)
+            saved.update(allContacts=all_chats.get(), contacts=ids)
+            render_scope()
+            scope_note.set('✓ 已生效：全部好友和普通群聊' if all_chats.get() else '✓ 已生效：已选择 %s 个会话' % len(ids))
+            status.set(result['status'])
+        except Exception as error:
+            all_chats.set(saved.get('allContacts', False))
+            render_scope()
+            scope_note.set('保存失败，已恢复原选择')
+            status.set('接管范围未确认保存：' + str(error))
+    all_check.configure(command=apply_scope)
+    selection.bind('<<ListboxSelect>>', apply_scope)
     def show_contacts(items):
-        nonlocal contacts
-        contacts=items;selection.delete(0, 'end')
-        for i, item in enumerate(items):
-            selection.insert('end', item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'])
-            if item['id'] in saved.get('contacts', []):selection.selection_set(i)
-        status.set('已刷新接管对象。取消全量接管后，可在列表中选择多个会话。')
+        nonlocal contacts, scope_ready
+        scope_ready=False
+        contacts=items
+        render_scope()
+        status.set('已刷新接管对象，点击会话即可选择，修改即时生效。')
+    scope_ready = True
     actions = ttk.Frame(scope, style='Card.TFrame');actions.pack(fill='x')
     button(actions, '刷新会话列表', lambda: task(platform.contacts, show_contacts))
+    def set_entire_scope(enabled):
+        nonlocal scope_ready
+        previous = scope_ready
+        scope_ready = False
+        all_chats.set(enabled)
+        selection.selection_clear(0, 'end')
+        if enabled:
+            selection.selection_set(0, 'end')
+        scope_ready = previous
+        # Clear remembered individual IDs too when cancelling everything.
+        if not enabled:
+            old_contacts = saved.get('contacts', [])
+            saved['contacts'] = []
+            apply_scope()
+            if '保存失败' in scope_note.get():
+                saved['contacts'] = old_contacts
+                render_scope()
+        else:
+            apply_scope()
+    button(actions, '一键接管全部', lambda: set_entire_scope(True))
+    button(actions, '一键取消全部', lambda: set_entire_scope(False))
+
     capabilities = card(pages[1], '回复能力')
     web_search = tk.BooleanVar(value=saved.get('webSearch', False))
     media_replies = tk.BooleanVar(value=saved.get('mediaReplies', False))
@@ -268,7 +328,29 @@ def build_console(platform=None, preview=False):
     owner_dialog=tk.BooleanVar(value=saved.get('ownerAssistant',False))
     language_names={'zh':'普通话','en':'英语','auto':'自动检测'}
     voice_language=tk.StringVar(value=language_names.get(saved.get('voiceLanguage','zh'),'普通话'))
-    consent = tk.BooleanVar(value=False)
+    from ai_reply import endpoint as normalize_endpoint
+    authorized_endpoint = saved.get('consentEndpoint', '')
+    def endpoint_authorized():
+        try:
+            return bool(authorized_endpoint) and normalize_endpoint(fields['endpoint'].get()) == authorized_endpoint
+        except Exception:
+            return False
+    consent = tk.BooleanVar(master=app, value=endpoint_authorized())
+    consent_note = tk.StringVar(master=app)
+    def consent_changed(*args):
+        consent_note.set('已确认当前 API 的会话提交与自动回复授权；运行状态见下方。' if consent.get() else
+                         '尚未确认当前 API 授权。此处不会暂停已运行的助手，停止回复请点“暂停 AI”。')
+    def endpoint_changed(*args):
+        try:
+            consent.set(bool(authorized_endpoint) and normalize_endpoint(endpoint_text.get()) == authorized_endpoint)
+        except Exception:
+            consent.set(False)
+    endpoint_text = tk.StringVar(master=app, value=fields['endpoint'].get())
+    fields['endpoint'].configure(textvariable=endpoint_text)
+    endpoint_text.trace_add('write', endpoint_changed)
+    app._endpoint_text = endpoint_text
+    consent.trace_add('write', consent_changed)
+    consent_changed()
     def mark_owner_edited():
         nonlocal owner_edited
         owner_edited=True
@@ -281,24 +363,28 @@ def build_console(platform=None, preview=False):
         check = ttk.Checkbutton(capabilities, text=text, variable=variable)
         if variable is owner_dialog:check.configure(command=mark_owner_edited)
         check.pack(anchor='w');widgets.append(check)
+    ttk.Label(capabilities, textvariable=consent_note, style='Muted.TLabel', wraplength=670).pack(anchor='w', pady=(4,8))
     voice_row=ttk.Frame(capabilities,style='Card.TFrame');voice_row.pack(fill='x',pady=(8,0))
     ttk.Label(voice_row,text='语音识别语言',style='Card.TLabel').pack(side='left',padx=(0,12))
     language_box=ttk.Combobox(voice_row,textvariable=voice_language,values=list(language_names.values()),width=15,state='readonly')
     language_box.pack(side='left');widgets.append(language_box)
     def form_values():
         data={name: entry.get() for name, entry in fields.items()}
-        data.update(contacts=[contacts[i]['id'] for i in selection.curselection()], allContacts=all_chats.get(),
+        data.update(contacts=[contacts[i]['id'] for i in selection.curselection()] if contacts else saved.get('contacts', []), allContacts=all_chats.get(),
                     webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(),
                     voiceReplies=voice_replies.get(), voiceLanguage=next((k for k,v in language_names.items() if v==voice_language.get()),'zh'),
                     ownerAssistant=owner_dialog.get(), ownerConsent=consent.get(), interval=1)
         return data
     def applied(result):
-        nonlocal owner_edited
+        nonlocal owner_edited, authorized_endpoint
         owner_edited=False
+        if consent.get():
+            authorized_endpoint=normalize_endpoint(fields['endpoint'].get())
         fields['apiKey'].delete(0, 'end')
         status.set(result['status'])
     def save():
         if mode.get() == 'uia':status.set('官方窗口模式的 AI 请在网页工作台设置中配置。');return
+        if not consent.get():status.set('请先确认当前 API 的会话提交与自动回复授权。');return
         data=form_values()
         task(lambda: platform.configure_ai(data, start=False), applied)
     def start():
@@ -427,12 +513,33 @@ def build_console(platform=None, preview=False):
                 except Exception:health_events.put((False,'本机后台状态读取失败。'))
             threading.Thread(target=check,daemon=True).start()
         if repeat:app.after(3000, update_health)
+    def wheel_units(event):
+        number = getattr(event, 'num', None)
+        if number in (4, 5):
+            return -1 if number == 4 else 1
+        delta = getattr(event, 'delta', 0)
+        return (-max(1, round(abs(delta) / 120)) if delta > 0 else
+                max(1, round(abs(delta) / 120)) if delta < 0 else 0)
+    def list_wheel(event):
+        selection.yview_scroll(wheel_units(event), 'units')
+        return 'break'
     def wheel(event):
-        delta=-1 if getattr(event, 'num', None)==4 else 1 if getattr(event, 'num', None)==5 else -int(event.delta/120)
-        canvases[notebook.index('current')].yview_scroll(delta, 'units')
-    app.bind('<MouseWheel>', wheel);app.bind('<Button-4>', wheel);app.bind('<Button-5>', wheel)
+        canvas = canvases[notebook.index('current')]
+        widget = event.widget
+        # Only the page under the pointer scrolls; sidebar/footer/dialogs do not.
+        while widget is not None and widget is not canvas:
+            widget = getattr(widget, 'master', None)
+        if widget is canvas:
+            canvas.yview_scroll(wheel_units(event), 'units')
+            return 'break'
+    for sequence in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+        selection.bind(sequence, list_wheel)
+        # Scrolling past a model/language field must not silently change it.
+        fields['model'].bind(sequence, lambda event: 'break')
+        language_box.bind(sequence, lambda event: 'break')
+        app.bind(sequence, wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
-                       consent=consent, start=start, save=save, canvases=canvases, selection=selection,
+                       consent=consent, start=start, save=save, canvases=canvases, selection=selection, show_contacts=show_contacts, scope_note=scope_note, set_entire_scope=set_entire_scope,
                        webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats, videoAnalysis=video_analysis, voiceReplies=voice_replies, ownerAssistant=owner_dialog)
     app.console.update(apply_health=show_health, connection_buttons=controls, badge=badge)
     if preview:

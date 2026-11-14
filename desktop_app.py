@@ -184,8 +184,21 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def update_scope(self, all_contacts, contacts):
+        if type(all_contacts) is not bool or not isinstance(contacts, list) or any(not isinstance(x, str) or not x for x in contacts):
+            raise ValueError('接管范围格式无效。')
+        path = self.root / 'private-data/workdesk-native-ai.json'
+        config = json.loads(path.read_text(encoding='utf-8'))
+        config.update(allContacts=all_contacts, contacts=list(dict.fromkeys(contacts)))
+        temp = path.with_suffix('.scope.tmp')
+        temp.write_text(json.dumps(config, ensure_ascii=False), encoding='utf-8')
+        temp.replace(path)
+        return {'status': '接管范围已即时生效。' if all_contacts or contacts else '已取消全部好友和群聊接管；个人助手保持原设置。'}
+
     def configure_ai(self, data, start=False):
         """Apply current form values before starting; never resume stale settings."""
+        if not data.get('ownerConsent'):
+            raise ValueError('请先确认当前 API 的会话提交与自动回复授权。')
         ai = self.ai()
         ai.pause()
         deadline = time.monotonic() + 45
@@ -237,8 +250,9 @@ class Platform:
             config['ownerEpoch']=uuid.uuid4().hex if changed else old.get('ownerEpoch','')
             config['ownerSince']=time.time() if changed else old.get('ownerSince',0)
             config['ownerStartCursor']=str(self.connection.request('threads?limit=1')['asOfEventCursor']) if changed and config['ownerAssistant'] else old.get('ownerStartCursor')
-            if not config['allContacts'] and not config['contacts']:
-                raise ValueError('请选择至少一个接管对象，或明确选择全部好友与群聊。')
+            # An empty scope intentionally disables friend/group replies.
+            if data.get('ownerConsent'):
+                config['consentEndpoint'] = config['endpoint']
             config['account'] = self.account
             key = config.pop('apiKey')
             config['encryptedKey'] = protect(key) if key else ''

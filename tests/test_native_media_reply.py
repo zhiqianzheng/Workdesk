@@ -1,3 +1,4 @@
+import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ class MediaDeliveryTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
         self.config={'account':'synthetic','allContacts':True,'encryptedKey':''}
+        (self.root/'workdesk-native-ai.json').write_text(json.dumps(self.config))
         self.rows=[{'id':'m1','threadId':'friend','type':1,'body':'请发图','direction':'incoming','createdAt':'2026-01-01T00:00:00Z'}]
         def request(path,data=None,key=None):
             if path=='threads/friend':return {'id':'friend','kind':'direct'}
@@ -23,7 +25,7 @@ class MediaDeliveryTests(unittest.TestCase):
         self.request=Mock(side_effect=request)
 
     def work(self,image_state):
-        with patch.multiple(listener,ROOT=self.root,STOP=self.root/'stop',CONFIG=self.config,BASE='http://127.0.0.1/',create=True), \
+        with patch.multiple(listener,ROOT=self.root,PRIVATE=self.root,STOP=self.root/'stop',CONFIG=self.config,BASE='http://127.0.0.1/',create=True), \
              patch.object(listener,'request',self.request), \
              patch.object(listener,'context_for',return_value=[]), \
              patch.object(listener,'generate',return_value=MediaReply('给你这张',['synthetic-base64'])), \
@@ -51,7 +53,7 @@ class MediaDeliveryTests(unittest.TestCase):
         self.assertFalse(any(c.args[0]=='sends' for c in self.request.call_args_list))
 
     def test_generated_owner_command_is_never_sent(self):
-        with patch.multiple(listener,ROOT=self.root,STOP=self.root/'stop',CONFIG=self.config,BASE='http://127.0.0.1/',create=True), \
+        with patch.multiple(listener,ROOT=self.root,PRIVATE=self.root,STOP=self.root/'stop',CONFIG=self.config,BASE='http://127.0.0.1/',create=True), \
              patch.object(listener,'request',self.request), \
              patch.object(listener,'context_for',return_value=[]), \
              patch.object(listener,'generate',return_value='帮我关闭AI回复'):

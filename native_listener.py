@@ -32,7 +32,11 @@ def initialize(root):
 
 
 def allowed(thread):
-    return CONFIG.get('allContacts') is True or thread in CONFIG.get('contacts', [])
+    try:
+        scope = json.loads((PRIVATE / 'workdesk-native-ai.json').read_text(encoding='utf-8'))
+        return scope.get('allContacts') is True or thread in scope.get('contacts', [])
+    except (OSError, ValueError):
+        return False
 
 
 def save(path, value):
@@ -107,7 +111,7 @@ def work(thread, messages, since=0):
         from native_ppt import requested, create_reply
         making_ppt = requested(received)
         context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False),voice_enabled=CONFIG.get('voiceReplies',False),voice_language=CONFIG.get('voiceLanguage','zh'), include_documents=making_ppt)
-        if STOP.exists():return {'state':'cancelled'}
+        if (STOP.exists() or not allowed(thread)):return {'state':'cancelled'}
         config = dict(CONFIG)
         config['presentationGeneration'] = True
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
@@ -123,7 +127,7 @@ def work(thread, messages, since=0):
         if control_text(str(reply)):
             return {'state': 'skipped_control_output'}
         model_seconds = round(time.monotonic() - model_start, 2)
-        if STOP.exists():
+        if (STOP.exists() or not allowed(thread)):
             return {'state': 'cancelled'}
         key = 'global-v1-' + hashlib.sha256((thread + '|' + '|'.join(sorted(messages))).encode()).hexdigest()[:40]
         images = getattr(reply, 'images', ())
@@ -133,17 +137,17 @@ def work(thread, messages, since=0):
             connection = NativeConnection({'directory': str(ROOT), 'account': CONFIG['account']})
             connection.selected = thread
             try:
-                if STOP.exists():
+                if (STOP.exists() or not allowed(thread)):
                     return {'state': 'cancelled'}
                 dispatched = True
                 result = send_file(connection, binding_key(thread), reply.file_payload,
-                                   request_id=key + '-pptx', should_stop=STOP.exists)
+                                   request_id=key + '-pptx', should_stop=lambda: STOP.exists() or not allowed(thread))
                 if result.get('state') != 'observed':
                     return {'state': 'uncertain' if result.get('state') != 'not_sent' else 'retry',
                             'errorType': 'PresentationSendUnconfirmed'}
             finally:
                 connection.close()
-            if STOP.exists():
+            if (STOP.exists() or not allowed(thread)):
                 return {'state': 'cancelled'}
         if images:
             from native_images import send_image
@@ -153,18 +157,18 @@ def work(thread, messages, since=0):
             connection.known[thread] = info
             try:
                 for index, image in enumerate(images[:1]):
-                    if STOP.exists():
+                    if (STOP.exists() or not allowed(thread)):
                         return {'state': 'cancelled'}
                     dispatched = True
                     sent_image = send_image(connection, binding_key(thread), image,
-                                            request_id=key + '-image-' + str(index), should_stop=STOP.exists)
+                                            request_id=key + '-image-' + str(index), should_stop=lambda: STOP.exists() or not allowed(thread))
                     if sent_image.get('state') == 'not_sent':
-                        return {'state': 'cancelled' if STOP.exists() else 'retry', 'errorType': 'ImageNotSent'}
+                        return {'state': 'cancelled' if (STOP.exists() or not allowed(thread)) else 'retry', 'errorType': 'ImageNotSent'}
                     if sent_image.get('state') != 'observed':
                         return {'state': 'uncertain', 'errorType': 'ImageSendUnknown'}
             finally:
                 connection.close()
-            if STOP.exists():
+            if (STOP.exists() or not allowed(thread)):
                 return {'state': 'cancelled'}
         dispatched = True
         sent = request('sends', {'threadId': thread, 'text': str(reply)}, key)
