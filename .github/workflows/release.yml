@@ -2,7 +2,7 @@ name: Build desktop releases
 on:
   workflow_dispatch:
   push:
-    tags: ['v1.1.0-preview.8']
+    tags: ['v1.1.0-preview.12']
 permissions:
   contents: write
 jobs:
@@ -63,4 +63,4 @@ jobs:
       - name: Publish preview
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --title 'Workdesk v1.1.0-preview.8' --notes-file docs/releases/v1.1.0-preview.8.md
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --title 'Workdesk v1.1.0-preview.12' --notes-file docs/releases/v1.1.0-preview.12.md
