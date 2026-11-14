@@ -416,6 +416,7 @@ class NativeAI:
         return {'backend': 'native', 'enabled': active, 'allContacts': self.config['allContacts'], 'contacts': self.config.get('contacts', []),
                 'ownerHealth':{'state':personal.get('state','off'),'ready':personal_ready,'replies':personal.get('replies',0)},
                 'ownerCommands': controls_active,
+                'manualHolds': {k:v for k,v in status.get('manualHolds',{}).items() if isinstance(v,(int,float)) and v>time.time()},
                 'endpoint': '', 'model': '', 'style': '', 'interval': 0, 'hasKey': True, 'webSearch': self.config.get('webSearch', False), 'mediaReplies': self.config.get('mediaReplies', False), 'videoAnalysis':self.config.get('videoAnalysis',False), 'voiceReplies':self.config.get('voiceReplies',False), 'ownerAssistant':self.config.get('ownerAssistant',False),
                 'status': ('原生后台 AI 已开启，按已配置的接管范围回复。' if active else inactive_note) +
                           (' 已启用按需联网检索。' if self.config.get('webSearch') else '') +

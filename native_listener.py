@@ -39,6 +39,38 @@ def allowed(thread):
         return False
 
 
+def manual_holds():
+    try:
+        value=json.loads((PRIVATE/'manual-takeover.json').read_text(encoding='utf-8'))
+        return {k:v for k,v in value.items() if isinstance(v,(int,float)) and v>time.time()}
+    except (OSError,ValueError):return {}
+
+
+def can_reply(thread):
+    return allowed(thread) and thread not in manual_holds()
+
+
+def group_addressed(info, rows):
+    if info.get('kind')!='group' or not CONFIG.get('groupMentionsOnly',True):return True
+    return any((r.get('mentions') or {}).get('self') is True or
+               (r.get('quote') or {}).get('direction')=='outgoing' for r in rows)
+
+
+def observe_manual(event, since):
+    data=event.get('data',{})
+    if (event.get('kind')!='message.committed' or data.get('direction')!='outgoing'
+            or data.get('origin')!='live' or not data.get('messageId') or data.get('threadId')=='filehelper'):
+        return
+    row=request('messages/'+quote(data['messageId']))
+    try:stamp=datetime.fromisoformat(row.get('createdAt','').replace('Z','+00:00')).timestamp()
+    except (ValueError,TypeError):return
+    if (row.get('accountId')!=CONFIG['account'] or row.get('threadId')!=data.get('threadId')
+            or row.get('direction')!='outgoing' or stamp<since or abs(time.time()-stamp)>90
+            or control_text(row.get('body'))):return
+    holds=manual_holds();holds[data['threadId']]=time.time()+600
+    save(PRIVATE/'manual-takeover.json',holds)
+
+
 def save(path, value):
     temp = path.with_suffix('.tmp')
     temp.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
@@ -86,7 +118,7 @@ def work(thread, messages, since=0):
     started = time.monotonic()
     try:
         info = request('threads/' + quote(thread))
-        if not ordinary(info) or not allowed(thread):
+        if not ordinary(info) or not can_reply(thread):
             return {'state': 'skipped'}
         rows = request('threads/' + quote(thread) + '/messages?limit=20')['items']
         targets = set(messages)
@@ -108,10 +140,11 @@ def work(thread, messages, since=0):
                         datetime.fromisoformat(row['createdAt'].replace('Z', '+00:00')).timestamp() >= since]
             if not received:
                 return {'state': 'skipped_old_history'}
+        if not group_addressed(info, received):return {'state':'skipped_unaddressed_group'}
         from native_ppt import requested, create_reply
         making_ppt = requested(received)
         context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False),voice_enabled=CONFIG.get('voiceReplies',False),voice_language=CONFIG.get('voiceLanguage','zh'), include_documents=making_ppt)
-        if (STOP.exists() or not allowed(thread)):return {'state':'cancelled'}
+        if (STOP.exists() or not can_reply(thread)):return {'state':'cancelled'}
         config = dict(CONFIG)
         config['presentationGeneration'] = True
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
@@ -127,7 +160,7 @@ def work(thread, messages, since=0):
         if control_text(str(reply)):
             return {'state': 'skipped_control_output'}
         model_seconds = round(time.monotonic() - model_start, 2)
-        if (STOP.exists() or not allowed(thread)):
+        if (STOP.exists() or not can_reply(thread)):
             return {'state': 'cancelled'}
         key = 'global-v1-' + hashlib.sha256((thread + '|' + '|'.join(sorted(messages))).encode()).hexdigest()[:40]
         images = getattr(reply, 'images', ())
@@ -137,17 +170,17 @@ def work(thread, messages, since=0):
             connection = NativeConnection({'directory': str(ROOT), 'account': CONFIG['account']})
             connection.selected = thread
             try:
-                if (STOP.exists() or not allowed(thread)):
+                if (STOP.exists() or not can_reply(thread)):
                     return {'state': 'cancelled'}
                 dispatched = True
                 result = send_file(connection, binding_key(thread), reply.file_payload,
-                                   request_id=key + '-pptx', should_stop=lambda: STOP.exists() or not allowed(thread))
+                                   request_id=key + '-pptx', should_stop=lambda: STOP.exists() or not can_reply(thread))
                 if result.get('state') != 'observed':
                     return {'state': 'uncertain' if result.get('state') != 'not_sent' else 'retry',
                             'errorType': 'PresentationSendUnconfirmed'}
             finally:
                 connection.close()
-            if (STOP.exists() or not allowed(thread)):
+            if (STOP.exists() or not can_reply(thread)):
                 return {'state': 'cancelled'}
         if images:
             from native_images import send_image
@@ -157,18 +190,18 @@ def work(thread, messages, since=0):
             connection.known[thread] = info
             try:
                 for index, image in enumerate(images[:1]):
-                    if (STOP.exists() or not allowed(thread)):
+                    if (STOP.exists() or not can_reply(thread)):
                         return {'state': 'cancelled'}
                     dispatched = True
                     sent_image = send_image(connection, binding_key(thread), image,
-                                            request_id=key + '-image-' + str(index), should_stop=lambda: STOP.exists() or not allowed(thread))
+                                            request_id=key + '-image-' + str(index), should_stop=lambda: STOP.exists() or not can_reply(thread))
                     if sent_image.get('state') == 'not_sent':
-                        return {'state': 'cancelled' if (STOP.exists() or not allowed(thread)) else 'retry', 'errorType': 'ImageNotSent'}
+                        return {'state': 'cancelled' if (STOP.exists() or not can_reply(thread)) else 'retry', 'errorType': 'ImageNotSent'}
                     if sent_image.get('state') != 'observed':
                         return {'state': 'uncertain', 'errorType': 'ImageSendUnknown'}
             finally:
                 connection.close()
-            if (STOP.exists() or not allowed(thread)):
+            if (STOP.exists() or not can_reply(thread)):
                 return {'state': 'cancelled'}
         dispatched = True
         sent = request('sends', {'threadId': thread, 'text': str(reply)}, key)
@@ -227,10 +260,11 @@ def main():
                     continue
                 events = request('events?after=' + quote(state['cursor']) + '&limit=200')
                 for event in events.get('items', []):
+                    observe_manual(event, state['activatedAt'])
                     data = event.get('data', {})
                     if event.get('kind') == 'message.committed' and data.get('origin') in ('live', 'catchup') and data.get('direction') == 'incoming':
                         thread, message = data.get('threadId'), data.get('messageId')
-                        if thread and message and allowed(thread) and thread not in state['blocked']:
+                        if thread and message and can_reply(thread) and thread not in state['blocked']:
                             queue = state['queue'].setdefault(thread, [])
                             if message not in queue and message not in state['inFlight'].get(thread, []):
                                 queue.append(message)
@@ -246,7 +280,7 @@ def main():
                     state['inFlight'][thread] = messages
                     save(STATE, state)
                     futures[thread] = pool.submit(work, thread, messages, state['activatedAt'])
-                status.update(state='listening', updatedAt=time.time(), replies=state['replies'],
+                status.update(state='listening', updatedAt=time.time(), replies=state['replies'], manualHolds=manual_holds(),
                               active=len(futures), queued=len(state['queue']), blocked=len(state['blocked']),
                               cursor=state['cursor'])
                 save(STATUS, status)

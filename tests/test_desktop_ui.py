@@ -135,3 +135,17 @@ class DesktopConsoleTests(unittest.TestCase):
             self.assertFalse(app.console['consent'].get())
         finally:
             app.destroy()
+
+    def test_scope_filter_preserves_hidden_selections(self):
+        self.platform.update_scope=Mock(return_value={'status':'saved'})
+        ui=self.app.console
+        ui['show_contacts']([{'id':'a','nickname':'Alice'}, {'id':'b','nickname':'Bob'}])
+        ui['selection'].selection_set(0,1)
+        ui['selection'].event_generate('<<ListboxSelect>>');self.app.update()
+        ui['scope_query'].set('Alice');self.app.update()
+        self.assertEqual(ui['selection'].size(),1)
+        ui['selection'].selection_clear(0)
+        ui['selection'].event_generate('<<ListboxSelect>>');self.app.update()
+        self.platform.update_scope.assert_called_with(False,['b'])
+        ui['scope_query'].set('');self.app.update()
+        self.assertTrue(ui['selection'].get(1).startswith('☑'))
