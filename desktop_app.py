@@ -193,6 +193,28 @@ class Platform:
         try:return chat_report.run(self.root,config,connection,thread,mode,start,end,count,progress,cancel)
         finally:connection.close()
 
+    def style_learning_preview(self,thread,days):
+        import memory_history,uuid
+        if thread=='filehelper':raise ValueError('请为好友或群聊学习你的回复风格，个人助手使用任务助理风格。')
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:data=memory_history.preview(connection,self.account,thread,days,include_outgoing=True)
+        finally:connection.close()
+        token=uuid.uuid4().hex;self._style_preview=(token,data)
+        return {'token':token,'name':data['name'],'limited':data['limited'],'samples':[{'id':r['id'],'text':r['body'],'time':r['createdAt']} for r in data['rows'] if r.get('direction')=='outgoing']}
+
+    def style_learning_analyze(self,token,selected):
+        import conversation_style
+        cached=getattr(self,'_style_preview',None)
+        if not cached or cached[0]!=token:raise ValueError('请先重新读取聊天样本。')
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        return conversation_style.analyze(config,cached[1],selected)
+
+    def apply_learned_style(self,thread,style):
+        if not isinstance(style,str) or not style.strip():raise ValueError('请先分析样本或填写风格规则。')
+        from assistant_profiles import load_profile,save_profile
+        old=load_profile(self.root,thread)
+        return save_profile(self.root,thread,style,old.get('memory',''),old.get('mode','auto'))
+
     def history_memory_preview(self,thread,days):
         import memory_history, uuid
         if not self.account:raise ValueError('请先连接微信。')

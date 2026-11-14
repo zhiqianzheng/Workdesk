@@ -536,6 +536,53 @@ def build_console(platform=None, preview=False):
         task(lambda:platform.history_memory_preview(target,days),show_preview)
     button(history_row,'预览并学习历史',preview_history)
     ttk.Label(memory_card,text='只读取本机已同步的历史；先预览再学习，不会给对方发消息。',style='Muted.TLabel',wraplength=660).pack(anchor='w',pady=(0,6))
+    style_row=ttk.Frame(memory_card,style='Card.TFrame');style_row.pack(fill='x',pady=6)
+    def learn_my_style():
+        target=memory_target[0]
+        if target=='filehelper':status.set('请先在“查看谁的记忆”选择好友或群聊。');return
+        days={'最近7天':7,'最近30天':30,'最近90天':90}[history_days.get()]
+        def show_samples(value):
+            if not value['samples']:status.set('这个范围内没有可供学习的本人发出文字，请换日期范围。');return
+            window=tk.Toplevel(app);window.title('学习我与“'+value['name']+'”的聊天方式');window.geometry('850x720')
+            ttk.Label(window,text='请选择确实是你本人写的消息，取消旧AI回复。仅凭发出方向无法可靠判断作者。',wraplength=790).pack(anchor='w',padx=12,pady=8)
+            samples=tk.Listbox(window,selectmode='multiple',exportselection=False,height=8)
+            samples.pack(fill='x',padx=12)
+            for row in value['samples']:samples.insert('end',row['time']+' · '+row['text'].replace('\n',' ')[:100])
+            from tkinter.scrolledtext import ScrolledText
+            sample_detail=tk.StringVar(master=window,value='点击样本可查看全文；可以选择多条。')
+            ttk.Label(window,textvariable=sample_detail,wraplength=790).pack(anchor='w',padx=12,pady=5)
+            def show_sample(event=None):
+                index=samples.index('active')
+                if index<len(value['samples']):sample_detail.set(value['samples'][index]['text'])
+            samples.bind('<<ListboxSelect>>',show_sample)
+            controls=ttk.Frame(window);controls.pack(fill='x',padx=12)
+            ttk.Button(controls,text='全选本人样本（请核对）',command=lambda:samples.selection_set(0,'end')).pack(side='left')
+            ttk.Button(controls,text='清空选择',command=lambda:samples.selection_clear(0,'end')).pack(side='left')
+            note=tk.StringVar(master=window,value='学习结果会先显示在下面，确认后才用于这个联系人的自动回复。')
+            ttk.Label(window,textvariable=note,wraplength=790).pack(anchor='w',padx=12,pady=6)
+            draft=ScrolledText(window,height=10,wrap='word');draft.pack(fill='both',expand=True,padx=12,pady=6)
+            def apply_style():
+                try:
+                    message=platform.apply_learned_style(target,draft.get('1.0','end').strip())
+                    note.set('已应用：今后回复此对象会参考这个风格。接管范围和启停不变。');status.set(message)
+                except ValueError as error:note.set(str(error))
+            apply_button=ttk.Button(window,text='应用这个风格（即时生效）',command=apply_style,state='disabled');apply_button.pack(pady=6)
+            def analyze_style():
+                ids=[value['samples'][i]['id'] for i in samples.curselection()]
+                if not ids:note.set('先选几条你本人写的消息。');return
+                analyze_button.configure(state='disabled');apply_button.configure(state='disabled');note.set('AI正在分析你的表达习惯…')
+                def done(result):
+                    if not window.winfo_exists():return
+                    draft.delete('1.0','end');draft.insert('1.0',result['style'])
+                    note.set('已分析 %s 条本人样本。请检查、修改下面的规则，然后应用。'%result['samples'])
+                    analyze_button.configure(state='normal');apply_button.configure(state='normal')
+                def failed(message):
+                    if window.winfo_exists():note.set(message);analyze_button.configure(state='normal')
+                task(lambda:platform.style_learning_analyze(value['token'],ids),done,failed)
+            analyze_button=ttk.Button(controls,text='分析选中样本',command=analyze_style);analyze_button.pack(side='left',padx=8)
+        task(lambda:platform.style_learning_preview(target,days),show_samples)
+    button(style_row,'学习我和这个人的聊天方式',learn_my_style)
+    ttk.Label(memory_card,text='沿用上方日期范围。选择你的真实回复作为样本，预览并应用专属风格；不是单纯保存聊天原话。',style='Muted.TLabel',wraplength=660).pack(anchor='w')
     advanced=ttk.Frame(memory_card,style='Card.TFrame')
     def toggle_memory_advanced():
         if advanced.winfo_manager():advanced.pack_forget();advanced_button.configure(text='高级设置（可选） ▸')

@@ -7,7 +7,7 @@ from urllib.parse import quote
 import conversation_memory as memory
 
 
-def preview(connection,account,thread,days):
+def preview(connection,account,thread,days,include_outgoing=False):
     if days not in (7,30,90):raise ValueError('请选择7、30或90天。')
     info=connection.request('threads/'+quote(thread,safe=''))
     if info.get('id')!=thread or not connection.writable(info):raise ValueError('此对象不支持聊天记忆。')
@@ -17,15 +17,16 @@ def preview(connection,account,thread,days):
         for row in page.get('items',[]):
             if row.get('id') in seen:continue
             seen.add(row.get('id'))
-            try:stamp=datetime.fromisoformat(row.get('createdAt','').replace('Z','+00:00')).timestamp()
+            try:stamp=datetime.fromisoformat(str(row.get('createdAt') or '').replace('Z','+00:00')).timestamp()
             except (ValueError,TypeError):continue
             # Personal owner inputs are verified outgoing messages, never assistant outputs.
             personal=thread=='filehelper' and row.get('direction')=='outgoing' and not str(row.get('body','')).startswith(('【个人助手】','AI 自动回复状态'))
             if (stamp<cutoff or row.get('accountId')!=account or row.get('threadId')!=thread or row.get('type')!=1
-                    or (row.get('direction')!='incoming' and not personal)):continue
+                    or (row.get('direction')!='incoming' and not personal and not (include_outgoing and row.get('direction')=='outgoing'))):continue
             from native_controls import control_text
-            if not isinstance(row.get('body'),str) or len(row['body'].strip())<4 or control_text(row['body']):continue
-            rows.append({**row,'direction':'incoming'})
+            if not isinstance(row.get('body'),str) or len(row['body'].strip())<(1 if include_outgoing else 4) or control_text(row['body']):continue
+            if include_outgoing and row['body'].startswith(('【个人助手】','AI 自动回复状态')):continue
+            rows.append({**row,'direction':row.get('direction') if include_outgoing else 'incoming'})
         cursor=page.get('nextCursor')
         if not cursor:break
         if cursor in cursors:limited=True;break
