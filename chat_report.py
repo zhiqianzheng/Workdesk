@@ -62,7 +62,7 @@ def run(root,config,connection,thread,mode,start='',end='',count=None,progress=l
                     if not isinstance(body,str):body=str(body)
                     nontext=row.get('type')!=1
                     if nontext:body='[非纯文字消息，类型%s，附件内容未分析] '%row.get('type')+body
-                    result=db.execute('INSERT OR IGNORE INTO rows VALUES (?,?,?,?,?,?,?)',(row['id'],stamp,row['createdAt'],row.get('senderId','未知发言者'),row.get('direction','unknown'),body,int(nontext)))
+                    result=db.execute('INSERT OR IGNORE INTO rows VALUES (?,?,?,?,?,?,?)',(row['id'],stamp,row['createdAt'],str(row.get('senderId') or '未知发言者'),str(row.get('direction') or 'unknown'),body,int(nontext)))
                     total+=result.rowcount
                     if mode=='count' and total>=count:break
                 progress('已读取 %s 条符合条件的消息 · %s 页'%(total,pages))
@@ -80,7 +80,7 @@ def run(root,config,connection,thread,mode,start='',end='',count=None,progress=l
             first,last,nontext=db.execute('SELECT MIN(created),MAX(created),SUM(nontext) FROM rows').fetchone()
             # Each message is processed in full, splitting long messages instead of dropping text.
             for identifier,stamp,sender,direction,body in db.execute('SELECT rowid,created,sender,direction,body FROM rows ORDER BY stamp,id'):
-                header='\n消息ID #'+str(identifier)+' | '+stamp+' | '+sender+' | '+direction+'\n'
+                header='\n消息ID #'+str(identifier)+' | '+stamp+' | '+str(sender or '未知发言者')+' | '+str(direction or 'unknown')+'\n'
                 for offset in range(0,max(1,len(body)),8000):
                     piece=header+body[offset:offset+8000]
                     if chunk and len(chunk)+len(piece)>12000:

@@ -617,7 +617,9 @@ def build_console(platform=None, preview=False):
             try:
                 value=platform.chat_summary_report(target,chosen,first,last,amount,lambda text:report_events.put(('progress',text)),report_job['cancel'].is_set)
                 report_events.put(('done',value))
-            except Exception as error:report_events.put(('error',str(error) if isinstance(error,ValueError) else '生成失败，请检查微信连接或 API 后重试。'))
+            except Exception as error:
+                kind=type(error).__name__
+                report_events.put(('error',str(error) if isinstance(error,ValueError) else '生成遇到内部错误（'+kind+'），请保留此提示以便排查。不是已确认的微信断线或API故障。'))
         threading.Thread(target=run_report,daemon=True).start()
         poll_report()
     def poll_report():
