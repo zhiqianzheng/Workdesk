@@ -185,6 +185,19 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def memory_embedding(self,model=None):
+        path=self.root/'private-data/workdesk-native-ai.json'
+        if model is None:return json.loads(path.read_text(encoding='utf-8')).get('memoryEmbeddingModel','')
+        if not isinstance(model,str) or len(model)>120 or any(ord(x)<32 for x in model):raise ValueError('Embedding模型ID无效。')
+        with edit_config(path) as config:config['memoryEmbeddingModel']=model.strip()
+        return 'Embedding设置已保存。留空使用本地词片段向量；接口不支持时退回本地检索。'
+
+    def conversation_memory(self,thread,action=None,message=None):
+        import conversation_memory
+        if not self.account:raise ValueError('请先连接微信账号。')
+        if action:return conversation_memory.manage(self.root,self.account,thread,action,message)
+        return conversation_memory.inspect(self.root,self.account,thread)
+
     def conversation_profile(self, thread, values=None):
         from assistant_profiles import load_profile, save_profile
         if values is None:return load_profile(self.root,thread)
@@ -283,6 +296,7 @@ class Platform:
                 key = config.pop('apiKey')
                 config['encryptedKey'] = protect(key) if key else ''
                 (private / 'global.stop').touch()
+                config['memoryEmbeddingModel']=old.get('memoryEmbeddingModel','')
                 old.clear()
                 old.update(config)
 

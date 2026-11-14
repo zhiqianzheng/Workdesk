@@ -426,11 +426,13 @@ def build_console(platform=None, preview=False):
         index=profile_choose.current()
         if index<0 or index>=len(contacts):status.set('请先刷新联系人并在此选择对象。');return
         item=contacts[index];profile_thread[0]=item['id']
+        memory_target[0]=item['id']
         try:value=platform.conversation_profile(item['id'])
         except ValueError as error:status.set(str(error));return
         profile_style.delete(0,'end');profile_style.insert(0,value.get('style',''))
         profile_memory.delete(0,'end');profile_memory.insert(0,value.get('memory',''))
         profile_mode.set(next((k for k,v in mode_names.items() if v==value.get('mode','auto')),'自动回复'))
+        memory_action()
     def save_profile_ui():
         if not profile_thread[0]:status.set('请先读取一个联系人的规则。');return
         try:status.set(platform.conversation_profile(profile_thread[0],dict(style=profile_style.get(),memory=profile_memory.get(),mode=mode_names[profile_mode.get()])))
@@ -438,6 +440,50 @@ def build_console(platform=None, preview=False):
     profile_buttons=ttk.Frame(personal,style='Card.TFrame');profile_buttons.pack(fill='x',pady=6)
     button(profile_buttons,'读取选中联系人规则',read_profile)
     button(profile_buttons,'即时保存联系人规则',save_profile_ui)
+    memory_card=card(pages[1],'自动记忆与向量检索','学习本会话新收到的文字，保留90天、每会话最多500条。记录原话而非推断事实；关闭后不再学习或检索。群成员原话带发言者来源。')
+    memory_state=tk.StringVar(master=app,value='请先读取上面的联系人规则，再刷新记忆。')
+    ttk.Label(memory_card,textvariable=memory_state,style='Muted.TLabel',wraplength=660).pack(anchor='w')
+    memory_list=tk.Listbox(memory_card,height=5,exportselection=False);memory_list.pack(fill='x',pady=5)
+    memory_detail=tk.StringVar(master=app,value='选择一条记忆可查看完整原话与来源。')
+    ttk.Label(memory_card,textvariable=memory_detail,style='Card.TLabel',wraplength=660).pack(anchor='w')
+    memory_rows=[]
+    def show_memory(event=None):
+        indices=memory_list.curselection()
+        if indices:
+            row=memory_rows[indices[0]]
+            memory_detail.set(row['stamp']+' · 发言者 '+row['sender']+'\n'+row['text'])
+    memory_list.bind('<<ListboxSelect>>',show_memory)
+    memory_target=[None]
+    def memory_action(action=None,thread=None):
+        nonlocal memory_rows
+        if thread:memory_target[0]=thread
+        target=memory_target[0] or profile_thread[0]
+        if not target:status.set('请先读取联系人规则，或点击个人助手记忆。');return
+        identifier=None
+        if action=='delete':
+            indices=memory_list.curselection()
+            if not indices:status.set('请先选择一条记忆。');return
+            identifier=memory_rows[indices[0]]['message']
+        if action=='clear':
+            from tkinter import messagebox
+            if not messagebox.askyesno('清空记忆','清空当前会话已学习的记忆？不会重新学习清空前的消息。',parent=app):return
+        try:
+            result=platform.conversation_memory(target,action,identifier)
+            memory_rows=result['items'];memory_list.delete(0,'end')
+            for row in memory_rows:memory_list.insert('end',row['stamp']+' · '+row['sender']+' · '+row['text'][:70])
+            memory_state.set(('个人助手 · ' if target=='filehelper' else '当前联系人 · ')+('自动学习与检索已开启' if result['enabled'] else '自动学习与检索已关闭')+' · %s 条记忆'%len(memory_rows))
+        except (ValueError,OSError) as error:status.set(str(error))
+    memory_buttons=ttk.Frame(memory_card,style='Card.TFrame');memory_buttons.pack(fill='x')
+    for label,action in [('刷新记忆',None),('开启学习','enable'),('关闭学习','disable'),('删除选中','delete'),('清空记忆','clear')]:
+        button(memory_buttons,label,lambda action=action:memory_action(action))
+    button(memory_card,'查看个人助手记忆',lambda:memory_action(thread='filehelper'))
+    ttk.Label(memory_card,text='可选 Embedding 模型 ID（使用已保存的同一 API；留空无需额外服务）',style='Muted.TLabel').pack(anchor='w',pady=(8,0))
+    embedding_entry=ttk.Entry(memory_card);embedding_entry.pack(fill='x')
+    if not preview:embedding_entry.insert(0,platform.memory_embedding())
+    def save_embedding():
+        try:status.set(platform.memory_embedding(embedding_entry.get()))
+        except ValueError as error:status.set(str(error))
+    button(memory_card,'即时保存检索模型',save_embedding)
     review = card(pages[2], '待审核文字回复', '只显示最近 24 小时的草稿。批准后由后台复核范围再发送；未知发送结果不会自动重试。')
     review_list=tk.Listbox(review,height=5,exportselection=False);review_list.pack(fill='x')
     review_rows=[]
@@ -633,6 +679,7 @@ def build_console(platform=None, preview=False):
         kind_box.bind(sequence, lambda event: 'break')
         profile_mode_box.bind(sequence, lambda event: 'break')
         profile_choose.bind(sequence, lambda event: 'break')
+        memory_list.bind(sequence,lambda event:(memory_list.yview_scroll(wheel_units(event),'units'),'break')[1])
         review_list.bind(sequence, lambda event: (review_list.yview_scroll(wheel_units(event),'units'), 'break')[1])
         app.bind(sequence, wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
