@@ -1,3 +1,4 @@
+from config_store import edit_config
 """Owner-authored exact text commands, monitored even while AI is paused."""
 from datetime import datetime
 import hashlib
@@ -104,11 +105,10 @@ class OwnerControls:
                     elif action=='owner_ack':
                         (self.private/'owner-assistant-reviewed').touch()
                     elif action in ('owner_pause','owner_start'):
-                        current=json.loads((self.private/'workdesk-native-ai.json').read_text(encoding='utf-8'))
-                        import uuid
-                        current.update(ownerAssistant=action=='owner_start',ownerEpoch=uuid.uuid4().hex,ownerSince=stamp,
-                                       ownerStartCursor=str(event['cursor']))
-                        atomic(self.private/'workdesk-native-ai.json',current)
+                        with edit_config(self.private/'workdesk-native-ai.json') as current:
+                            import uuid
+                            current.update(ownerAssistant=action=='owner_start',ownerEpoch=uuid.uuid4().hex,ownerSince=stamp,
+                                           ownerStartCursor=str(event['cursor']))
                     elif action=='status' and row['id'] not in state.get('queriesDone', []):
                         state.setdefault('queries', {}).setdefault(row['id'], {'thread': row['threadId']})
                     state['lastCommand'] = action

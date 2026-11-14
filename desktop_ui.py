@@ -139,7 +139,10 @@ def build_console(platform=None, preview=False):
     names = ['连接与登录', 'AI 自动回复', '运行状态']
     def navigate(index):
         notebook.select(index);title.set(names[index])
-        if index == 1:action_dock.grid()
+        if index == 1:
+            action_dock.grid()
+            if not preview and not contacts and not busy and cached_connection.get('online'):
+                task(platform.contacts, show_contacts)
         else:action_dock.grid_remove()
         for i, b in enumerate(nav):
             b.configure(bg='#29494e' if i == index else INK, fg='white' if i == index else '#b7cbca')
@@ -254,39 +257,61 @@ def build_console(platform=None, preview=False):
     scope_ready = False
     scope_note = tk.StringVar(value='当前接管全部好友和普通群聊' if all_chats.get() else '当前已选择 %s 个会话' % len(saved.get('contacts', [])))
     ttk.Label(scope, textvariable=scope_note, style='Card.TLabel').pack(anchor='w', pady=(4, 2))
-    def render_scope():
-        nonlocal scope_ready
+    visible_contacts = []
+    scope_query = tk.StringVar(master=app)
+    scope_kind = tk.StringVar(master=app, value='全部')
+    scope_selected_only = tk.BooleanVar(master=app)
+    filters = ttk.Frame(scope, style='Card.TFrame')
+    filters.pack(fill='x', before=list_frame, pady=(6, 0))
+    ttk.Label(filters, text='搜索', style='Card.TLabel').pack(side='left')
+    ttk.Entry(filters, textvariable=scope_query, width=18).pack(side='left', padx=5)
+    kind_box = ttk.Combobox(filters, textvariable=scope_kind, values=['全部','好友','群聊'], state='readonly', width=7)
+    kind_box.pack(side='left', padx=5)
+    ttk.Checkbutton(filters, text='只看已接管', variable=scope_selected_only).pack(side='left')
+    def render_scope(*args):
+        nonlocal scope_ready, visible_contacts
         scope_ready=False
         top=selection.yview()[0]
         selection.delete(0, 'end')
-        for i, item in enumerate(contacts):
+        visible_contacts=[]
+        query=scope_query.get().strip().casefold()
+        for item in contacts:
             checked=all_chats.get() or item['id'] in saved.get('contacts', [])
             name=item.get('remark') or item.get('displayName') or item.get('nickname') or item['id']
+            group=item.get('kind')=='group' or item['id'].endswith('@chatroom')
+            if query and query not in (name+' '+item['id']).casefold():continue
+            if scope_kind.get()=='好友' and group or scope_kind.get()=='群聊' and not group:continue
+            if scope_selected_only.get() and not checked:continue
+            i=len(visible_contacts);visible_contacts.append(item)
             selection.insert('end', ('☑  ' if checked else '☐  ') + name)
             if checked:selection.selection_set(i)
         selection.yview_moveto(top)
         scope_ready=True
-    ttk.Label(scope, text='点击会话可逐个选择或取消，立即生效；取消全部选择后不回复好友和群聊。', style='Muted.TLabel').pack(anchor='w')
-    def apply_scope(event=None):
-        if not scope_ready:
-            return
-        ids = [contacts[i]['id'] for i in selection.curselection()] if contacts else saved.get('contacts', [])
+    for variable in (scope_query,scope_kind,scope_selected_only):variable.trace_add('write',render_scope)
+    ttk.Label(scope, text='选择即时生效；筛选仅影响显示，不改变接管范围。', style='Muted.TLabel').pack(anchor='w')
+    def apply_scope(event=None, override=None):
+        if not scope_ready:return
+        visible_ids={item['id'] for item in visible_contacts}
+        selected_ids={visible_contacts[i]['id'] for i in selection.curselection()}
+        old_ids=set(saved.get('contacts', []))
         if event is not None:
-            expected = {item['id'] for item in contacts} if all_chats.get() else set(saved.get('contacts', [])) & {item['id'] for item in contacts}
-            if set(ids) == expected:
-                return
+            expected=visible_ids if saved.get('allContacts') else old_ids & visible_ids
+            if selected_ids==expected:return
+            # Leaving global mode retains all other loaded conversations.
+            old_ids={item['id'] for item in contacts} if saved.get('allContacts') else old_ids
             all_chats.set(False)
+        ids=sorted((old_ids-visible_ids)|selected_ids) if event is not None else sorted(old_ids)
+        if override is not None:ids=override
         try:
-            result = platform.update_scope(all_chats.get(), ids)
+            result=platform.update_scope(all_chats.get(),ids)
             saved.update(allContacts=all_chats.get(), contacts=ids)
             render_scope()
             scope_note.set('✓ 已生效：全部好友和普通群聊' if all_chats.get() else '✓ 已生效：已选择 %s 个会话' % len(ids))
             status.set(result['status'])
         except Exception as error:
-            all_chats.set(saved.get('allContacts', False))
-            render_scope()
+            all_chats.set(saved.get('allContacts',False));render_scope()
             scope_note.set('保存失败，已恢复原选择')
-            status.set('接管范围未确认保存：' + str(error))
+            status.set('接管范围未确认保存：'+str(error))
     all_check.configure(command=apply_scope)
     selection.bind('<<ListboxSelect>>', apply_scope)
     def show_contacts(items):
@@ -299,28 +324,13 @@ def build_console(platform=None, preview=False):
     actions = ttk.Frame(scope, style='Card.TFrame');actions.pack(fill='x')
     button(actions, '刷新会话列表', lambda: task(platform.contacts, show_contacts))
     def set_entire_scope(enabled):
-        nonlocal scope_ready
-        previous = scope_ready
-        scope_ready = False
         all_chats.set(enabled)
-        selection.selection_clear(0, 'end')
-        if enabled:
-            selection.selection_set(0, 'end')
-        scope_ready = previous
-        # Clear remembered individual IDs too when cancelling everything.
-        if not enabled:
-            old_contacts = saved.get('contacts', [])
-            saved['contacts'] = []
-            apply_scope()
-            if '保存失败' in scope_note.get():
-                saved['contacts'] = old_contacts
-                render_scope()
-        else:
-            apply_scope()
+        apply_scope(override=[])
     button(actions, '一键接管全部', lambda: set_entire_scope(True))
     button(actions, '一键取消全部', lambda: set_entire_scope(False))
 
-    capabilities = card(pages[1], '回复能力')
+    capabilities = card(pages[1], '回复能力', '本区修改需点击下方保存；保存配置会暂停好友群聊，保存并开启会应用后恢复。亲自在微信发言后，该会话自动让开 10 分钟。')
+    group_mentions = tk.BooleanVar(master=app, value=saved.get('groupMentionsOnly', True))
     web_search = tk.BooleanVar(value=saved.get('webSearch', False))
     media_replies = tk.BooleanVar(value=saved.get('mediaReplies', False))
     video_analysis=tk.BooleanVar(value=saved.get('videoAnalysis',False))
@@ -354,7 +364,8 @@ def build_console(platform=None, preview=False):
     def mark_owner_edited():
         nonlocal owner_edited
         owner_edited=True
-    for text, variable in [('按需联网查询天气、新闻等（需要服务支持）', web_search),
+    for text, variable in [('群聊仅在 @我 或引用我的消息时回复（减少插话）', group_mentions),
+                           ('按需联网查询天气、新闻等（需要服务支持）', web_search),
                            ('按请求生成图片和表情图片（使用图像额度）', media_replies),
                            ('分析收到的 MP4 视频画面（抽帧，不含声音）', video_analysis),
                            ('本地语音转文字后回复（识别可能有误）', voice_replies),
@@ -370,8 +381,8 @@ def build_console(platform=None, preview=False):
     language_box.pack(side='left');widgets.append(language_box)
     def form_values():
         data={name: entry.get() for name, entry in fields.items()}
-        data.update(contacts=[contacts[i]['id'] for i in selection.curselection()] if contacts else saved.get('contacts', []), allContacts=all_chats.get(),
-                    webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(),
+        data.update(contacts=saved.get('contacts', []), allContacts=all_chats.get(),
+                    groupMentionsOnly=group_mentions.get(), webSearch=web_search.get(), mediaReplies=media_replies.get(), videoAnalysis=video_analysis.get(),
                     voiceReplies=voice_replies.get(), voiceLanguage=next((k for k,v in language_names.items() if v==voice_language.get()),'zh'),
                     ownerAssistant=owner_dialog.get(), ownerConsent=consent.get(), interval=1)
         return data
@@ -396,6 +407,16 @@ def build_console(platform=None, preview=False):
     button(ai_actions, '保存配置', save)
     button(ai_actions, '保存并开启 / 恢复 AI', start, 'Primary.TButton')
     button(ai_actions, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])), 'Danger.TButton')
+    trial = card(pages[1], '试聊预览', '使用已保存的 API 和风格测试一条虚构消息，只显示在这里，不发微信、不调用图片或联网工具。修改风格后请先保存。')
+    trial_input = ttk.Entry(trial)
+    trial_input.pack(fill='x', pady=(0,6));widgets.append(trial_input)
+    trial_result = tk.StringVar(master=app, value='输入一句虚构的聊天消息，看看助手怎么接话。')
+    ttk.Label(trial, textvariable=trial_result, style='Card.TLabel', wraplength=660).pack(anchor='w', pady=8)
+    def try_chat():
+        text=trial_input.get()
+        trial_result.set('正在试聊…')
+        task(lambda:platform.preview_reply(text), trial_result.set, trial_result.set)
+    button(trial, '预览回复（不发送微信）', try_chat)
     summary = tk.StringVar(value='正在读取运行状态…')
     details = tk.StringVar(value='')
     health = card(pages[2], '当前运行状态')
@@ -440,11 +461,17 @@ def build_console(platform=None, preview=False):
         details.set(('本人口令：' + ('监听正常' if value.get('ownerCommands') else '未就绪')
                      + '    ·    累计回复：%s 条' % value.get('metrics', {}).get('replies', 0)
                      + '\n\n微信连接：' + cached_connection.get('detail', '尚未检查')
+                     + '\n\nAPI：未持续探测；请在 AI 设置中测试对话连接确认当前可用性。'
+                     + '\n\n好友群范围：' + ('全部好友和普通群聊' if value.get('allContacts') else '已选择 %s 个会话' % len(value.get('contacts',[])))
                      + '\n\n' + value.get('status', '')
                      + '\n\n处理中 %s · 排队 %s · 待核对 %s' % (metrics.get('active',0),metrics.get('queued',0),metrics.get('blocked',0))
                      + '\n\n监听心跳：%s 秒前' % health_info.get('scanAgeSeconds', '—')))
         details.set(details.get()+'\n\n个人助手：'+('待核对发送结果' if owner_health.get('state')=='blocked' else '工作中' if owner_health.get('state')=='working' else '监听正常' if owner_health.get('ready') else '未就绪或已关闭')
                     +' · 累计回复 %s 条'%owner_health.get('replies',0))
+        holds=value.get('manualHolds',{})
+        if holds:
+            labels={item['id']:item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'] for item in contacts}
+            details.set(details.get()+'\n\n人工接管中：'+ '、'.join(labels.get(k,k) for k in holds)+'（本人发言后让开 10 分钟）')
         if mode.get()=='native':connection_note.set(cached_connection.get('detail','正在检查后台状态…'))
         if not busy and status.get().startswith('准备后台、扫码登录'):
             status.set(cached_connection.get('detail','正在检查后台状态…'))
@@ -537,9 +564,10 @@ def build_console(platform=None, preview=False):
         # Scrolling past a model/language field must not silently change it.
         fields['model'].bind(sequence, lambda event: 'break')
         language_box.bind(sequence, lambda event: 'break')
+        kind_box.bind(sequence, lambda event: 'break')
         app.bind(sequence, wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
-                       consent=consent, start=start, save=save, canvases=canvases, selection=selection, show_contacts=show_contacts, scope_note=scope_note, set_entire_scope=set_entire_scope,
+                       consent=consent, start=start, save=save, canvases=canvases, selection=selection, show_contacts=show_contacts, scope_note=scope_note, set_entire_scope=set_entire_scope, scope_query=scope_query, scope_kind=scope_kind, scope_selected_only=scope_selected_only,
                        webSearch=web_search, mediaReplies=media_replies, allContacts=all_chats, videoAnalysis=video_analysis, voiceReplies=voice_replies, ownerAssistant=owner_dialog)
     app.console.update(apply_health=show_health, connection_buttons=controls, badge=badge)
     if preview:

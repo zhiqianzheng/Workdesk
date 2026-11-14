@@ -13,6 +13,7 @@ import urllib.request
 import webbrowser
 
 from ai_reply import AutoReply, protect
+from config_store import edit_config
 from native_backend import NativeAI, NativeConnection
 from server import runtime_dir
 
@@ -184,15 +185,21 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def preview_reply(self, text):
+        if not isinstance(text,str) or not text.strip() or len(text)>4000:
+            raise ValueError('请输入 1–4000 字的虚构消息。')
+        from ai_reply import generate
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        config['apiKey']=protect(config.pop('encryptedKey'),decrypt=True) if config.get('encryptedKey') else ''
+        config.update(webSearch=False,mediaReplies=False,ownerConversation=False)
+        return str(generate(config,[{'kind':'text','direction':'incoming','text':text.strip()}]))
+
     def update_scope(self, all_contacts, contacts):
         if type(all_contacts) is not bool or not isinstance(contacts, list) or any(not isinstance(x, str) or not x for x in contacts):
             raise ValueError('接管范围格式无效。')
         path = self.root / 'private-data/workdesk-native-ai.json'
-        config = json.loads(path.read_text(encoding='utf-8'))
-        config.update(allContacts=all_contacts, contacts=list(dict.fromkeys(contacts)))
-        temp = path.with_suffix('.scope.tmp')
-        temp.write_text(json.dumps(config, ensure_ascii=False), encoding='utf-8')
-        temp.replace(path)
+        with edit_config(path) as config:
+            config.update(allContacts=all_contacts, contacts=list(dict.fromkeys(contacts)))
         return {'status': '接管范围已即时生效。' if all_contacts or contacts else '已取消全部好友和群聊接管；个人助手保持原设置。'}
 
     def configure_ai(self, data, start=False):
@@ -233,33 +240,33 @@ class Platform:
             except OSError:
                 raise ValueError('AI 正在运行，请先暂停，等待退出后再保存配置。') from None
             old_path = private / 'workdesk-native-ai.json'
-            old = json.loads(old_path.read_text(encoding='utf-8')) if old_path.exists() else {}
-            if not data.get('apiKey') and old.get('encryptedKey'):
-                data['apiKey'] = protect(old['encryptedKey'], decrypt=True)
-            data.setdefault('webSearch', old.get('webSearch', False))
-            data.setdefault('mediaReplies', old.get('mediaReplies', False))
-            data.setdefault('videoAnalysis',old.get('videoAnalysis',False))
-            data.setdefault('voiceReplies',old.get('voiceReplies',False))
-            data.setdefault('voiceLanguage',old.get('voiceLanguage','zh'))
-            data.setdefault('ownerAssistant',old.get('ownerAssistant',False))
-            config = AutoReply.validate(data)
-            if config['ownerAssistant'] and not old.get('ownerAssistant') and not data.get('ownerConsent'):
-                raise ValueError('首次开启文件传输助手个人对话，请先确认会话提交与自动回复授权。')
-            import uuid
-            changed=config['ownerAssistant']!=old.get('ownerAssistant',False)
-            config['ownerEpoch']=uuid.uuid4().hex if changed else old.get('ownerEpoch','')
-            config['ownerSince']=time.time() if changed else old.get('ownerSince',0)
-            config['ownerStartCursor']=str(self.connection.request('threads?limit=1')['asOfEventCursor']) if changed and config['ownerAssistant'] else old.get('ownerStartCursor')
-            # An empty scope intentionally disables friend/group replies.
-            if data.get('ownerConsent'):
-                config['consentEndpoint'] = config['endpoint']
-            config['account'] = self.account
-            key = config.pop('apiKey')
-            config['encryptedKey'] = protect(key) if key else ''
-            (private / 'global.stop').touch()
-            temp = old_path.with_suffix('.tmp')
-            temp.write_text(json.dumps(config, ensure_ascii=False), encoding='utf-8')
-            os.replace(temp, old_path)
+            with edit_config(old_path) as old:
+                if not data.get('apiKey') and old.get('encryptedKey'):
+                    data['apiKey'] = protect(old['encryptedKey'], decrypt=True)
+                data.setdefault('webSearch', old.get('webSearch', False))
+                data.setdefault('mediaReplies', old.get('mediaReplies', False))
+                data.setdefault('videoAnalysis',old.get('videoAnalysis',False))
+                data.setdefault('voiceReplies',old.get('voiceReplies',False))
+                data.setdefault('voiceLanguage',old.get('voiceLanguage','zh'))
+                data.setdefault('ownerAssistant',old.get('ownerAssistant',False))
+                config = AutoReply.validate(data)
+                if config['ownerAssistant'] and not old.get('ownerAssistant') and not data.get('ownerConsent'):
+                    raise ValueError('首次开启文件传输助手个人对话，请先确认会话提交与自动回复授权。')
+                import uuid
+                changed=config['ownerAssistant']!=old.get('ownerAssistant',False)
+                config['ownerEpoch']=uuid.uuid4().hex if changed else old.get('ownerEpoch','')
+                config['ownerSince']=time.time() if changed else old.get('ownerSince',0)
+                config['ownerStartCursor']=str(self.connection.request('threads?limit=1')['asOfEventCursor']) if changed and config['ownerAssistant'] else old.get('ownerStartCursor')
+                # An empty scope intentionally disables friend/group replies.
+                if data.get('ownerConsent'):
+                    config['consentEndpoint'] = config['endpoint']
+                config['groupMentionsOnly'] = data.get('groupMentionsOnly', old.get('groupMentionsOnly', True))
+                config['account'] = self.account
+                key = config.pop('apiKey')
+                config['encryptedKey'] = protect(key) if key else ''
+                (private / 'global.stop').touch()
+                old.clear()
+                old.update(config)
 
     def session(self):
         try:
