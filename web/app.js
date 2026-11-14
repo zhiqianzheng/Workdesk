@@ -401,8 +401,6 @@ async function selectProject(project){
   if(confirmed&&page===startingPage&&!document.querySelector('dialog[open]')){
    if(page!=='records')setPage('records');
    composerExpanded=true;syncReadingAppearance();
-   sidebarCollapsed=true;sidebarReturnFocus=null;
-   storage.set('workdesk-sidebar-collapsed','1');syncSidebar();
    renderRecords();resizeDraft();
    if(!$('draft').disabled){
     $('draft').focus({preventScroll:true});
