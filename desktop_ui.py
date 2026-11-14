@@ -318,6 +318,7 @@ def build_console(platform=None, preview=False):
         nonlocal contacts, scope_ready
         scope_ready=False
         contacts=items
+        profile_choose.configure(values=[(item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'])+' · '+item['id'] for item in contacts])
         render_scope()
         status.set('已刷新接管对象，点击会话即可选择，修改即时生效。')
     scope_ready = True
@@ -407,6 +408,71 @@ def build_console(platform=None, preview=False):
     button(ai_actions, '保存配置', save)
     button(ai_actions, '保存并开启 / 恢复 AI', start, 'Primary.TButton')
     button(ai_actions, '暂停 AI', lambda: task(lambda: platform.ai().pause(), lambda r: status.set(r['status'])), 'Danger.TButton')
+    personal = card(pages[1], '联系人风格与长期备注', '在此选择联系人再点读取，不改变接管勾选。独立规则即时保存；长期备注由你维护。')
+    profile_target = tk.StringVar(master=app, value='尚未选择联系人')
+    profile_thread = [None]
+    profile_choose=ttk.Combobox(personal,textvariable=profile_target,state='readonly')
+    profile_choose.pack(fill='x')
+    profile_choose.bind('<<ComboboxSelected>>',lambda event: profile_thread.__setitem__(0,None))
+    profile_mode = tk.StringVar(master=app,value='自动回复')
+    mode_names={'自动回复':'auto','先审核文字':'review','不回复':'off'}
+    profile_mode_box=ttk.Combobox(personal,textvariable=profile_mode,values=list(mode_names),state='readonly')
+    profile_mode_box.pack(anchor='w',pady=5)
+    ttk.Label(personal,text='独立风格',style='Muted.TLabel').pack(anchor='w')
+    profile_style=ttk.Entry(personal);profile_style.pack(fill='x');widgets.append(profile_style)
+    ttk.Label(personal,text='长期备注（可随时修改或清空）',style='Muted.TLabel').pack(anchor='w')
+    profile_memory=ttk.Entry(personal);profile_memory.pack(fill='x');widgets.append(profile_memory)
+    def read_profile():
+        index=profile_choose.current()
+        if index<0 or index>=len(contacts):status.set('请先刷新联系人并在此选择对象。');return
+        item=contacts[index];profile_thread[0]=item['id']
+        try:value=platform.conversation_profile(item['id'])
+        except ValueError as error:status.set(str(error));return
+        profile_style.delete(0,'end');profile_style.insert(0,value.get('style',''))
+        profile_memory.delete(0,'end');profile_memory.insert(0,value.get('memory',''))
+        profile_mode.set(next((k for k,v in mode_names.items() if v==value.get('mode','auto')),'自动回复'))
+    def save_profile_ui():
+        if not profile_thread[0]:status.set('请先读取一个联系人的规则。');return
+        try:status.set(platform.conversation_profile(profile_thread[0],dict(style=profile_style.get(),memory=profile_memory.get(),mode=mode_names[profile_mode.get()])))
+        except ValueError as error:status.set(str(error))
+    profile_buttons=ttk.Frame(personal,style='Card.TFrame');profile_buttons.pack(fill='x',pady=6)
+    button(profile_buttons,'读取选中联系人规则',read_profile)
+    button(profile_buttons,'即时保存联系人规则',save_profile_ui)
+    review = card(pages[2], '待审核文字回复', '只显示最近 24 小时的草稿。批准后由后台复核范围再发送；未知发送结果不会自动重试。')
+    review_list=tk.Listbox(review,height=5,exportselection=False);review_list.pack(fill='x')
+    review_rows=[]
+    draft_text=tk.StringVar(master=app)
+    draft_editor=ttk.Entry(review,textvariable=draft_text)
+    draft_editor.pack(fill='x',pady=5)
+    def show_review(event=None):
+        indices=review_list.curselection()
+        if indices:draft_text.set(review_rows[indices[0]]['text'])
+    review_list.bind('<<ListboxSelect>>',show_review)
+    def refresh_reviews():
+        nonlocal review_rows
+        review_rows=platform.review_drafts();review_list.delete(0,'end')
+        for row in review_rows:review_list.insert('end',row['thread']+' · '+row['state']+' · '+row['text'])
+        if not review_rows:status.set('暂无待审核草稿。')
+    def decide_review(approved):
+        indices=review_list.curselection()
+        if not indices:status.set('请先选择草稿。');return
+        try:status.set(platform.review_drafts(review_rows[indices[0]]['key'],approved,text=draft_text.get() if approved else None))
+        except ValueError as error:status.set(str(error))
+        refresh_reviews()
+    review_buttons=ttk.Frame(review,style='Card.TFrame');review_buttons.pack(fill='x')
+    button(review_buttons,'刷新草稿',refresh_reviews)
+    button(review_buttons,'批准发送当前文字',lambda:decide_review(True))
+    button(review_buttons,'丢弃草稿',lambda:decide_review(False))
+    recovery=card(pages[2],'本机偏好备份与恢复','备份范围和风格、联系人备注；不含密钥、登录态或消息队列。恢复前会自动另存当前偏好，需要先停止两个助手。')
+    backup_name=tk.StringVar(master=app)
+    ttk.Entry(recovery,textvariable=backup_name).pack(fill='x')
+    button(recovery,'创建本机快照',lambda:task(platform.backup_settings,lambda value:status.set(value)))
+    def restore_preferences():
+        from tkinter import messagebox
+        if not backup_name.get().strip():status.set('请填写本机快照的完整路径。');return
+        if messagebox.askyesno('恢复偏好','恢复所选快照中的范围、风格和联系人备注？当前偏好会先备份。',parent=app):
+            name=backup_name.get().strip();task(lambda:platform.backup_settings(name),lambda value:status.set(value))
+    button(recovery,'校验并恢复偏好',restore_preferences)
     trial = card(pages[1], '试聊预览', '使用已保存的 API 和风格测试一条虚构消息，只显示在这里，不发微信、不调用图片或联网工具。修改风格后请先保存。')
     trial_input = ttk.Entry(trial)
     trial_input.pack(fill='x', pady=(0,6));widgets.append(trial_input)
@@ -565,6 +631,9 @@ def build_console(platform=None, preview=False):
         fields['model'].bind(sequence, lambda event: 'break')
         language_box.bind(sequence, lambda event: 'break')
         kind_box.bind(sequence, lambda event: 'break')
+        profile_mode_box.bind(sequence, lambda event: 'break')
+        profile_choose.bind(sequence, lambda event: 'break')
+        review_list.bind(sequence, lambda event: (review_list.yview_scroll(wheel_units(event),'units'), 'break')[1])
         app.bind(sequence, wheel)
     app.console = dict(notebook=notebook, navigate=navigate, fields=fields, status=status, summary=summary,
                        consent=consent, start=start, save=save, canvases=canvases, selection=selection, show_contacts=show_contacts, scope_note=scope_note, set_entire_scope=set_entire_scope, scope_query=scope_query, scope_kind=scope_kind, scope_selected_only=scope_selected_only,

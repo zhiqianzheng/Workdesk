@@ -185,6 +185,24 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def conversation_profile(self, thread, values=None):
+        from assistant_profiles import load_profile, save_profile
+        if values is None:return load_profile(self.root,thread)
+        return save_profile(self.root,thread,**values)
+
+    def review_drafts(self, key=None, approved=False, text=None):
+        import reply_review
+        if text is not None:reply_review.edit(self.root,key,text)
+        return reply_review.pending(self.root) if key is None else reply_review.decide(self.root,key,approved)
+
+    def backup_settings(self, filename=None):
+        import settings_backup
+        if filename is None:return '本机偏好快照已创建：'+settings_backup.create(self.root)
+        status=self.health()
+        if status.get('enabled') or status.get('ownerAssistant') or status.get('ownerHealth',{}).get('ready'):
+            raise ValueError('恢复前请暂停好友群 AI 并关闭个人助手，等待任务退出。')
+        return settings_backup.restore(self.root,filename)
+
     def preview_reply(self, text):
         if not isinstance(text,str) or not text.strip() or len(text)>4000:
             raise ValueError('请输入 1–4000 字的虚构消息。')
