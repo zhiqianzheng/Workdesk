@@ -69,12 +69,15 @@ def enabled(db,account,thread):
     return row or (1,0)
 
 
-def learn(root,account,thread,rows):
+def learn(root,account,thread,rows,historical=False):
     from native_controls import control_text
     from datetime import datetime
     with connect(root) as db:
         on,since=enabled(db,account,thread)
-        if not on:return
+        if not on:
+            if historical:raise ValueError('此对象的记忆已关闭，请先开启后再导入。')
+            return
+        if historical:since=0
         for row in rows:
             body=row.get('body','')
             if (row.get('accountId',account)!=account or row.get('threadId')!=thread or row.get('direction')!='incoming'

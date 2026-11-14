@@ -482,7 +482,7 @@ def build_console(platform=None, preview=False):
             identifier=memory_rows[indices[0]]['message']
         if action=='clear':
             from tkinter import messagebox
-            if not messagebox.askyesno('清空聊天记忆','清空“'+memory_name.get()+'”的全部记忆？清空前的旧消息不会重新学回来。',parent=app):return
+            if not messagebox.askyesno('清空聊天记忆','清空“'+memory_name.get()+'”的全部记忆？清空前的旧消息不会自动学回来；主动导入历史时可重新学习。',parent=app):return
         try:
             result=platform.conversation_memory(target,action,identifier)
             memory_on[0]=result['enabled'];memory_rows=result['items']
@@ -492,7 +492,7 @@ def build_console(platform=None, preview=False):
             for row in memory_rows:memory_list.insert('end',row['text'].replace('\n',' ')[:70])
             memory_state.set(('● 记忆已开启' if result['enabled'] else '○ 记忆已关闭')+' · 已记住 %s 条'%len(memory_rows))
             if result['enabled']:
-                memory_hint.set('还没有记忆。助手处理此对象的新文字后会自动记住，再点“刷新”查看；不会导入以前的聊天。' if not memory_rows else '点击一条可查看原话。回复时会自动参考相关记忆，不需要你手动选择。')
+                memory_hint.set('还没有记忆。助手处理此对象的新文字后会自动记住，再点“刷新”查看；不会自动导入旧记录，可用下方“预览并学习历史”补充。' if not memory_rows else '点击一条可查看原话。回复时会自动参考相关记忆，不需要你手动选择。')
             else:memory_hint.set('已停止记住和参考此对象的聊天；原有记忆保留，可删除或重新开启。')
             if target=='filehelper':memory_hint.set(memory_hint.get()+' 个人助手需保持开启。')
             else:memory_hint.set(memory_hint.get()+' 好友/群聊需在接管范围内且 AI 已开启。')
@@ -511,6 +511,30 @@ def build_console(platform=None, preview=False):
     delete_memory=button(memory_buttons,'删除选中记忆',lambda:memory_action('delete'));delete_memory.configure(state='disabled')
     clear_memory=button(memory_buttons,'清空此对象记忆',lambda:memory_action('clear'));clear_memory.configure(state='disabled')
     ttk.Label(memory_card,text='开关与删除立即生效，无需再点保存。每个对象最多保留500条、90天。',style='Muted.TLabel').pack(anchor='w',pady=(3,8))
+    history_row=ttk.Frame(memory_card,style='Card.TFrame');history_row.pack(fill='x',pady=(8,3))
+    ttk.Label(history_row,text='从以前的聊天学习',style='Card.TLabel').pack(side='left',padx=(0,8))
+    history_days=tk.StringVar(master=app,value='最近30天')
+    history_range=ttk.Combobox(history_row,textvariable=history_days,values=['最近7天','最近30天','最近90天'],state='readonly',width=10)
+    history_range.pack(side='left')
+    def preview_history():
+        target=memory_target[0]
+        days={'最近7天':7,'最近30天':30,'最近90天':90}[history_days.get()]
+        def show_preview(result):
+            if not result['count']:
+                memory_hint.set('没有读到这个时间范围内可学习的文字。只能读取本机后台已同步的记录，不代表手机里没有历史。');return
+            from tkinter import messagebox
+            details='对象：'+result['name']+'\n可读取文字：%s 条（最多500条）'%result['count']
+            if result['limited']:details+='\n记录较多，本次仅预览已读取部分。'
+            details+='\n\n最近原话预览：\n'+'\n'.join(result['examples'][:5])
+            details+='\n\n继续后会向已配置的 API 提交部分原话，由 AI 提取记忆；并建立原话检索。不会发送微信消息，不会开启自动回复。是否开始？'
+            if not messagebox.askyesno('预览历史学习',details,parent=app):return
+            def imported(value):
+                memory_action(thread=target)
+                memory_hint.set('已处理 %s 条原话，AI 阅读其中 %s 条并提取 %s 条记忆；重复记录自动跳过。'%(value['originals'],value['sampled'],value['summaries']))
+            app.after(10,lambda:task(lambda:platform.history_memory_import(result['token']),imported))
+        task(lambda:platform.history_memory_preview(target,days),show_preview)
+    button(history_row,'预览并学习历史',preview_history)
+    ttk.Label(memory_card,text='只读取本机已同步的历史；先预览再学习，不会给对方发消息。',style='Muted.TLabel',wraplength=660).pack(anchor='w',pady=(0,6))
     advanced=ttk.Frame(memory_card,style='Card.TFrame')
     def toggle_memory_advanced():
         if advanced.winfo_manager():advanced.pack_forget();advanced_button.configure(text='高级设置（可选） ▸')
@@ -720,6 +744,7 @@ def build_console(platform=None, preview=False):
         profile_mode_box.bind(sequence, lambda event: 'break')
         profile_choose.bind(sequence, lambda event: 'break')
         memory_choose.bind(sequence, lambda event: 'break')
+        history_range.bind(sequence, lambda event: 'break')
         memory_list.bind(sequence,lambda event:(memory_list.yview_scroll(wheel_units(event),'units'),'break')[1])
         review_list.bind(sequence, lambda event: (review_list.yview_scroll(wheel_units(event),'units'), 'break')[1])
         app.bind(sequence, wheel)

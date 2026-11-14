@@ -185,6 +185,25 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
+    def history_memory_preview(self,thread,days):
+        import memory_history, uuid
+        if not self.account:raise ValueError('请先连接微信。')
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:data=memory_history.preview(connection,self.account,thread,days)
+        finally:connection.close()
+        token=uuid.uuid4().hex
+        self._memory_preview=(token,data)
+        return {'token':token,'name':data['name'],'count':len(data['rows']),'limited':data['limited'],
+                'examples':[r['body'][:160] for r in data['rows'][:10]]}
+
+    def history_memory_import(self,token):
+        import memory_history
+        cached=getattr(self,'_memory_preview',None)
+        if not cached or cached[0]!=token:raise ValueError('请重新预览聊天记录。')
+        self._memory_preview=None
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        return memory_history.import_preview(self.root,config,cached[1])
+
     def memory_embedding(self,model=None):
         path=self.root/'private-data/workdesk-native-ai.json'
         if model is None:return json.loads(path.read_text(encoding='utf-8')).get('memoryEmbeddingModel','')
