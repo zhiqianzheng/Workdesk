@@ -165,3 +165,17 @@ class DesktopConsoleTests(unittest.TestCase):
         ui['memory_action']('disable')
         self.assertIn('记忆已关闭',ui['memory_state'].get())
         self.assertIn('无需保存',ui['status'].get())
+
+    def test_report_can_be_reopened_after_console_restart(self):
+        folder=self.platform.root/'private-data/chat-reports'
+        folder.mkdir(parents=True)
+        (folder/'latest.md').write_text('# Saved report',encoding='utf-8')
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        button=next(widget for widget in descendants(self.app) if widget.winfo_class()=='TButton' and widget.cget('text')=='查看上次报告')
+        button.invoke();self.app.update()
+        import tkinter as tk
+        windows=[w for w in self.app.winfo_children() if isinstance(w,tk.Toplevel)]
+        self.assertTrue(any(w.title()=='聊天总结报告' for w in windows))
