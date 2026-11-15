@@ -27,7 +27,7 @@ def image_result(encoded):
 
 def sticker_tool():
     return {'type':'function', 'name':'get_sticker',
-        'description':'从网上获取一张适合聊天的现成表情图片（OpenMoji）。简单反应图可贴合话题与情绪主动使用，也可应对方要求使用；定制梗图、熊猫头等使用 image_generation。',
+        'description':'从网上获取一张适合聊天的现成表情图片（OpenMoji）。这是主动聊天反应工具：报喜庆祝、接梗、轻松附和时可直接调用，不需要对方提出发图请求。按语境选择，不按次数或概率发图；定制梗图、熊猫头等使用 image_generation。',
         'strict':True, 'parameters':{'type':'object', 'properties':{
             'mood':{'type':'string','enum':list(STICKERS)},
             'caption':{'type':'string','description':'不超过60字的自然配文，不声称已发送。'}},

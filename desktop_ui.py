@@ -369,7 +369,7 @@ def build_console(platform=None, preview=False):
         owner_edited=True
     for text, variable in [('群聊仅在 @我 或引用我的消息时回复（减少插话）', group_mentions),
                            ('按需联网查询天气、新闻等（需要服务支持）', web_search),
-                           ('按请求生成图片和表情图片（使用图像额度）', media_replies),
+                           ('按语境主动发表情或图片（生成图片使用图像额度）', media_replies),
                            ('分析收到的 MP4 视频画面（抽帧，不含声音）', video_analysis),
                            ('本地语音转文字后回复（识别可能有误）', voice_replies),
                            ('文件传输助手个人对话（独立于好友群自动回复）', owner_dialog),
