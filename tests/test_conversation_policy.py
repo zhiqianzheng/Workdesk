@@ -50,15 +50,7 @@ class ConversationPolicyTests(TestCase):
         (self.private/'workdesk-native-ai.json').write_text(json.dumps({'allContacts':False,'contacts':[]}))
         self.assertFalse(listener.can_reply('friend'))
 
-    def test_preview_uses_synthetic_input_without_media_tools(self):
+    def test_retired_memory_and_preview_actions_are_not_exposed(self):
         from desktop_app import Platform
-        config=self.private/'private-data'
-        config.mkdir()
-        (config/'workdesk-native-ai.json').write_text(json.dumps({'model':'test','encryptedKey':'','webSearch':True,'mediaReplies':True}))
-        app=Platform(root=self.private)
-        with patch('ai_reply.generate',return_value='收到') as generate:
-            self.assertEqual(app.preview_reply('测试一下'),'收到')
-        settings,records=generate.call_args.args
-        self.assertFalse(settings['webSearch'])
-        self.assertFalse(settings['mediaReplies'])
-        self.assertEqual(records[0]['text'],'测试一下')
+        for name in ('conversation_memory','history_memory_import','history_memory_preview','review_drafts','backup_settings','preview_reply'):
+            self.assertFalse(hasattr(Platform,name))

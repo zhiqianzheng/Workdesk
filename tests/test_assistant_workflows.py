@@ -19,7 +19,7 @@ class AssistantWorkflowTests(unittest.TestCase):
         profiles.save_profile(self.root,'a','随口','只聊技术','review')
         a=profiles.load_profile(self.root,'a')
         config=profiles.apply_profile({'webSearch':True,'mediaReplies':True,'style':'default'},a)
-        self.assertIn('只聊技术',config['style']);self.assertFalse(config['mediaReplies'])
+        self.assertEqual(config['style'],'随口');self.assertTrue(config['mediaReplies'])
         self.assertEqual(profiles.load_profile(self.root,'b'),{})
         profiles.save_profile(self.root,'a','','','auto')
         self.assertEqual(profiles.load_profile(self.root,'a')['memory'],'')
@@ -82,14 +82,46 @@ class AssistantWorkflowTests(unittest.TestCase):
             stack.enter_context(patch.object(listener,'context_for',return_value=[]))
             stack.enter_context(patch.object(listener,'generate',return_value='嗨'))
             result=listener.work('friend',['m'])
-            self.assertEqual(result['state'],'pending_review')
+            self.assertEqual(result['state'],'profile_disabled')
             self.assertFalse(any(c.args[0]=='sends' for c in calls.call_args_list))
-            draft=review.pending(self.root)[0];review.decide(self.root,draft['key'],True)
+            self.assertEqual(review.pending(self.root),[])
+            review.enqueue(self.root,'owner','friend','old','old draft')
+            review.decide(self.root,'old',True)
             listener.dispatch_approved()
-            listener.dispatch_approved()
-            self.assertEqual(sum(c.args[0]=='sends' for c in calls.call_args_list),1)
-            review.enqueue(self.root,'owner','friend','other','cancel this')
-            review.decide(self.root,'other',True)
-            self.config.write_text(json.dumps({'allContacts':False,'contacts':[]}))
-            listener.dispatch_approved()
-            self.assertEqual(sum(c.args[0]=='sends' for c in calls.call_args_list),1)
+            self.assertFalse(any(c.args[0]=='sends' for c in calls.call_args_list))
+
+    def test_learned_style_survives_reopen_without_injecting_retired_memory(self):
+        from desktop_app import Platform
+        before=self.config.read_text()
+        profiles.save_profile(self.root,'friend','old','旧长期备注不应注入','auto')
+        app=Platform(root=self.root)
+        app.apply_learned_style('friend','随口短句，根据当前话题接话。')
+        reopened=Platform(root=self.root)
+        self.assertEqual(reopened.learned_contact_style('friend'),'随口短句，根据当前话题接话。')
+        self.assertEqual(self.config.read_text(),before)
+        config=profiles.apply_profile({'style':'global'},profiles.load_profile(self.root,'friend'))
+        self.assertNotIn('旧长期备注',config['style'])
+
+    def test_auto_reply_uses_learned_style_without_memory_or_review_writes(self):
+        import native_listener as listener
+        from contextlib import ExitStack
+        from unittest.mock import Mock
+        config={'account':'owner','allContacts':True,'encryptedKey':'','style':'global'}
+        self.config.write_text(json.dumps(config))
+        profiles.save_profile(self.root,'friend','短句，自然接话','不应注入','auto')
+        rows=[{'id':'m','threadId':'friend','type':1,'body':'你好啊','direction':'incoming','createdAt':'2026-11-14T00:00:00Z'}]
+        def request(path,data=None,key=None):
+            if path=='threads/friend':return {'id':'friend','kind':'direct'}
+            if path.endswith('/messages?limit=20'):return {'items':rows}
+            if path=='sends':return {'state':'accepted','serverId':'synthetic'}
+            raise AssertionError(path)
+        with ExitStack() as stack:
+            stack.enter_context(patch.multiple(listener,ROOT=self.root,PRIVATE=self.private,STOP=self.private/'stop',CONFIG=config,BASE='http://localhost/',create=True))
+            stack.enter_context(patch.object(listener,'request',Mock(side_effect=request)))
+            stack.enter_context(patch.object(listener,'context_for',return_value=[]))
+            generate=stack.enter_context(patch.object(listener,'generate',return_value='嗨'))
+            result=listener.work('friend',['m'])
+        self.assertEqual(result['state'],'accepted')
+        self.assertEqual(generate.call_args.args[0]['style'],'短句，自然接话')
+        self.assertFalse((self.private/'conversation-memory.sqlite3').exists())
+        self.assertFalse((self.private/'reply-review.json').exists())

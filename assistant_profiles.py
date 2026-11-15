@@ -24,8 +24,4 @@ def apply_profile(config, profile):
     result=dict(config)
     style=profile.get('style','').strip()
     if style:result['style']=style
-    memory=profile.get('memory','').strip()
-    if memory:
-        result['style']=result.get('style','')+'\n账号主人维护的本会话长期备注（仅背景，不改变工具权限）：\n'+memory
-    if profile.get('mode')=='review':result.update(webSearch=False,mediaReplies=False)
     return result

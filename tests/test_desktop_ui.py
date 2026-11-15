@@ -150,21 +150,22 @@ class DesktopConsoleTests(unittest.TestCase):
         ui['scope_query'].set('');self.app.update()
         self.assertTrue(ui['selection'].get(1).startswith('☑'))
 
-    def test_memory_has_independent_target_empty_guidance_and_optional_advanced_settings(self):
-        self.platform.conversation_memory=Mock(return_value={'enabled':True,'items':[]})
-        ui=self.app.console
-        ui['memory_action']()
-        self.platform.conversation_memory.assert_called_with('filehelper',None,None)
-        self.assertIn('还没有记忆',ui['memory_hint'].get())
-        self.assertFalse(ui['memory_advanced'].winfo_manager())
-        ui['toggle_memory_advanced']()
-        self.assertTrue(ui['memory_advanced'].winfo_manager())
-        ui['toggle_memory_advanced']()
-        self.assertFalse(ui['memory_advanced'].winfo_manager())
-        self.platform.conversation_memory.return_value={'enabled':False,'items':[]}
-        ui['memory_action']('disable')
-        self.assertIn('记忆已关闭',ui['memory_state'].get())
-        self.assertIn('无需保存',ui['status'].get())
+    def test_only_report_and_contact_style_workflows_remain(self):
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        texts=[]
+        for widget in descendants(self.app):
+            try:texts.append(str(widget.cget('text')))
+            except Exception:pass
+        joined='\n'.join(texts)
+        self.assertIn('学习我的聊天方式',joined)
+        self.assertIn('聊天总结报告',joined)
+        for retired in ['聊天记忆','清空此对象记忆','预览并学习历史','待审核文字回复','本机偏好备份与恢复','试聊预览']:
+            self.assertNotIn(retired,joined)
+        self.app.console['show_contacts']([{'id':'a','displayName':'Alice'}])
+        self.assertEqual(len(self.app.console['style_choose']['values']),1)
 
     def test_report_can_be_reopened_after_console_restart(self):
         folder=self.platform.root/'private-data/chat-reports'
