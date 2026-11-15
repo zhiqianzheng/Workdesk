@@ -25,15 +25,13 @@ class ConversationPolicyTests(TestCase):
         self.config['groupMentionsOnly']=False
         self.assertTrue(listener.group_addressed({'kind':'group'},[]))
 
-    def test_manual_live_message_holds_thread_and_expiry_resumes(self):
-        row={'accountId':'synthetic','threadId':'friend','direction':'outgoing','type':1,
-             'body':'我来处理','createdAt':datetime.now(timezone.utc).isoformat()}
-        event={'kind':'message.committed','data':{'threadId':'friend','direction':'outgoing','origin':'live','messageId':'m'}}
-        with patch.object(listener,'request',return_value=row):listener.observe_manual(event,time.time()-30)
-        self.assertFalse(listener.can_reply('friend'))
-        self.assertTrue(listener.can_reply('other'))
-        with patch.object(listener.time,'time',return_value=time.time()+601):
-            self.assertTrue(listener.can_reply('friend'))
+    def test_manual_message_and_old_hold_never_pause_contact(self):
+        (self.private/'manual-takeover.json').write_text(json.dumps({'friend':time.time()+600}))
+        with patch.object(listener,'request') as request:
+            listener.observe_manual({'kind':'message.committed','data':{'direction':'outgoing','origin':'live','threadId':'friend','messageId':'m'}},0)
+            request.assert_not_called()
+        self.assertTrue(listener.can_reply('friend'))
+        self.assertEqual(listener.manual_holds(),{})
 
     def test_own_api_sends_and_old_messages_do_not_trigger_takeover(self):
         event={'kind':'message.committed','data':{'direction':'outgoing','origin':'local_send','messageId':'m'}}

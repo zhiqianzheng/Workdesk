@@ -41,14 +41,12 @@ def allowed(thread):
 
 
 def manual_holds():
-    try:
-        value=json.loads((PRIVATE/'manual-takeover.json').read_text(encoding='utf-8'))
-        return {k:v for k,v in value.items() if isinstance(v,(int,float)) and v>time.time()}
-    except (OSError,ValueError):return {}
+    # Compatibility: historical holds are ignored; only explicit pause controls apply.
+    return {}
 
 
 def can_reply(thread):
-    return allowed(thread) and thread not in manual_holds() and load_profile(PRIVATE.parent,thread).get('mode')!='off'
+    return allowed(thread) and load_profile(PRIVATE.parent,thread).get('mode')!='off'
 
 
 def group_addressed(info, rows):
@@ -58,18 +56,8 @@ def group_addressed(info, rows):
 
 
 def observe_manual(event, since):
-    data=event.get('data',{})
-    if (event.get('kind')!='message.committed' or data.get('direction')!='outgoing'
-            or data.get('origin')!='live' or not data.get('messageId') or data.get('threadId')=='filehelper'):
-        return
-    row=request('messages/'+quote(data['messageId']))
-    try:stamp=datetime.fromisoformat(row.get('createdAt','').replace('Z','+00:00')).timestamp()
-    except (ValueError,TypeError):return
-    if (row.get('accountId')!=CONFIG['account'] or row.get('threadId')!=data.get('threadId')
-            or row.get('direction')!='outgoing' or stamp<since or abs(time.time()-stamp)>90
-            or control_text(row.get('body'))):return
-    holds=manual_holds();holds[data['threadId']]=time.time()+600
-    save(PRIVATE/'manual-takeover.json',holds)
+    # Manual chat messages do not pause automatic replies.
+    return None
 
 
 def save(path, value):
@@ -279,7 +267,6 @@ def main():
                     continue
                 events = request('events?after=' + quote(state['cursor']) + '&limit=200')
                 for event in events.get('items', []):
-                    observe_manual(event, state['activatedAt'])
                     data = event.get('data', {})
                     if event.get('kind') == 'message.committed' and data.get('origin') in ('live', 'catchup') and data.get('direction') == 'incoming':
                         thread, message = data.get('threadId'), data.get('messageId')

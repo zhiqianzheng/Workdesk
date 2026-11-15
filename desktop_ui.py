@@ -332,7 +332,7 @@ def build_console(platform=None, preview=False):
     button(actions, '一键接管全部', lambda: set_entire_scope(True))
     button(actions, '一键取消全部', lambda: set_entire_scope(False))
 
-    capabilities = card(pages[1], '回复能力', '本区修改需点击下方保存；保存配置会暂停好友群聊，保存并开启会应用后恢复。亲自在微信发言后，该会话自动让开 10 分钟。')
+    capabilities = card(pages[1], '回复能力', '本区修改需点击下方保存；保存配置会暂停好友群聊，保存并开启会应用后恢复。人工发言不会暂停 AI；需要停止时请使用暂停按钮。')
     group_mentions = tk.BooleanVar(master=app, value=saved.get('groupMentionsOnly', True))
     web_search = tk.BooleanVar(value=saved.get('webSearch', False))
     media_replies = tk.BooleanVar(value=saved.get('mediaReplies', False))
@@ -636,10 +636,6 @@ def build_console(platform=None, preview=False):
                      + '\n\n监听心跳：%s 秒前' % health_info.get('scanAgeSeconds', '—')))
         details.set(details.get()+'\n\n个人助手：'+('待核对发送结果' if owner_health.get('state')=='blocked' else '工作中' if owner_health.get('state')=='working' else '监听正常' if owner_health.get('ready') else '未就绪或已关闭')
                     +' · 累计回复 %s 条'%owner_health.get('replies',0))
-        holds=value.get('manualHolds',{})
-        if holds:
-            labels={item['id']:item.get('remark') or item.get('displayName') or item.get('nickname') or item['id'] for item in contacts}
-            details.set(details.get()+'\n\n人工接管中：'+ '、'.join(labels.get(k,k) for k in holds)+'（本人发言后让开 10 分钟）')
         if mode.get()=='native':connection_note.set(cached_connection.get('detail','正在检查后台状态…'))
         if not busy and status.get().startswith('准备后台、扫码登录'):
             status.set(cached_connection.get('detail','正在检查后台状态…'))
