@@ -150,6 +150,7 @@ def work(thread, messages, since=0):
         if (STOP.exists() or not can_reply(thread)):return {'state':'cancelled'}
         config = apply_profile(CONFIG,profile)
         config['presentationGeneration'] = True
+        config['allowNoReply'] = True
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()
         if making_ppt:
@@ -159,6 +160,14 @@ def work(thread, messages, since=0):
                 reply = '这次 PPT 制作没有完成，内容生成或文件检查失败，没有生成可发送的成品。可以稍后让我重新制作。'
         else:
             reply = generate(config, context)
+        # A follow-up can arrive while generation is running. Do not send a stale answer.
+        latest_stamp=max((str(r.get('createdAt') or '') for r in received),default='')
+        fresh=request('threads/'+quote(thread)+'/messages?limit=20').get('items',[])
+        known_ids={r.get('id') for r in rows}
+        if any(r.get('id') not in known_ids and r.get('threadId')==thread and replyable(r)
+               and str(r.get('createdAt') or '')>latest_stamp for r in fresh):
+            return {'state':'retry','reason':'newer_message_arrived'}
+        if getattr(reply,'skip',False):return {'state':'skipped_no_reply'}
         # Generated content must never impersonate the owner's control command.
         if control_text(str(reply)):
             return {'state': 'skipped_control_output'}

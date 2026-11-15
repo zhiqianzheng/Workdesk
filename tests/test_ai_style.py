@@ -48,3 +48,10 @@ class ProactiveMediaPolicyTests(unittest.TestCase):
         config['mediaReplies']=False
         disabled=web_payload(config,[{'role':'user','content':'终于考过了！'}])
         self.assertFalse(any(tool.get('name')=='get_sticker' for tool in disabled['tools']))
+
+class ConversationalTurnTests(unittest.TestCase):
+    def test_silence_signal_is_only_enabled_for_opted_in_contact_chat(self):
+        from ai_reply import normalize_reply
+        self.assertTrue(getattr(normalize_reply('[[NO_REPLY]]',{'allowNoReply':True}),'skip',False))
+        self.assertFalse(getattr(normalize_reply('[[NO_REPLY]]',{'allowNoReply':True,'ownerConversation':True}),'skip',False))
+        self.assertFalse(getattr(normalize_reply('普通回复',{'allowNoReply':True}),'skip',False))
