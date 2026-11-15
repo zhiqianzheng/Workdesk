@@ -24,15 +24,21 @@ class MediaDeliveryTests(unittest.TestCase):
             self.fail(path)
         self.request=Mock(side_effect=request)
 
-    def work(self,image_state):
+    def work(self,image_state,reply=None):
         with patch.multiple(listener,ROOT=self.root,PRIVATE=self.root,STOP=self.root/'stop',CONFIG=self.config,BASE='http://127.0.0.1/',create=True), \
              patch.object(listener,'request',self.request), \
              patch.object(listener,'context_for',return_value=[]), \
-             patch.object(listener,'generate',return_value=MediaReply('给你这张',['synthetic-base64'])), \
+             patch.object(listener,'generate',return_value=MediaReply('给你这张',['synthetic-base64']) if reply is None else reply), \
              patch.object(listener,'NativeConnection',return_value=Mock(known={})) as connection, \
              patch('native_images.send_image',return_value={'state':image_state}) as image:
             result=listener.work('friend',['m1'])
             return result,image
+
+    def test_image_only_reply_never_posts_an_empty_caption(self):
+        result,image=self.work('observed',MediaReply('',['synthetic-base64']))
+        self.assertEqual(result['state'],'accepted')
+        self.assertEqual(result['imageCount'],1)
+        self.assertFalse(any(c.args[0]=='sends' for c in self.request.call_args_list))
 
     def test_image_is_confirmed_before_caption_and_uses_stable_send_key(self):
         result,image=self.work('observed')
@@ -63,3 +69,12 @@ class MediaDeliveryTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class OwnerImageOnlyTests(unittest.TestCase):
+    def test_personal_assistant_does_not_send_prefix_after_image(self):
+        import native_owner as owner
+        connection=Mock(known={})
+        with patch.object(owner,'enabled',return_value=True),patch.object(owner,'NativeConnection',return_value=connection),patch('native_images.send_image',return_value={'state':'observed'}):
+            result=owner.deliver(Path('/unused'),'synthetic',{'epoch':'test','key':'test','images':['synthetic'],'text':owner.PREFIX+' '})
+        self.assertEqual(result['state'],'accepted')
+        connection.request.assert_not_called()

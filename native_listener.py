@@ -206,6 +206,8 @@ def work(thread, messages, since=0):
                 connection.close()
             if (STOP.exists() or not can_reply(thread)):
                 return {'state': 'cancelled'}
+        if images and not str(reply).strip():
+            return {'state':'accepted','imageCount':len(images),'modelSeconds':model_seconds,'totalSeconds':round(time.monotonic()-started,2)}
         dispatched = True
         sent = request('sends', {'threadId': thread, 'text': str(reply)}, key)
         deadline = time.monotonic() + 30

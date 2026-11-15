@@ -22,6 +22,7 @@ class MediaTests(unittest.TestCase):
         reply=response_text({'status':'completed','output':[{'type':'image_generation_call','result':encoded}]},d,allow_media=True)
         self.assertIsInstance(reply,str)
         self.assertEqual(len(reply.images),1)
+        self.assertEqual(str(reply),'')
         self.assertEqual(d['image_count'],1)
 
     def test_transparent_sticker_has_white_background_after_upload_conversion(self):
@@ -84,3 +85,18 @@ class MediaTests(unittest.TestCase):
 
 
 if __name__ == '__main__':unittest.main()
+
+
+class ImageOnlyTests(unittest.TestCase):
+    def test_sticker_discards_caption_and_extra_model_text(self):
+        payload={'status':'completed','output':[{'type':'function_call','name':'get_sticker','arguments':'{"mood":"happy","caption":"给你一个表情"}'},{'type':'message','role':'assistant','content':[{'type':'output_text','text':'额外文字 https://example.test'}]}]}
+        with patch('ai_web.get_sticker',return_value=MediaReply('素材链接',['synthetic'])):
+            reply=response_text(payload,allow_media=True)
+        self.assertEqual(str(reply),'');self.assertEqual(reply.images,('synthetic',))
+    def test_sticker_credit_is_embedded_not_a_chat_link(self):
+        response=MagicMock();response.__enter__.return_value.read.return_value=png()
+        with patch('ai_media.urllib.request.urlopen',return_value=response):reply=get_sticker('happy','多余配文')
+        self.assertEqual(str(reply),'')
+        with Image.open(io.BytesIO(image_bytes(reply.images[0]))) as picture:
+            self.assertGreaterEqual(picture.width,420)
+            self.assertGreater(picture.height,8)

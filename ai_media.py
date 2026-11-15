@@ -1,5 +1,6 @@
 """Bounded image replies and online OpenMoji assets; no arbitrary file access."""
 import base64
+import io
 import urllib.request
 from native_images import image_bytes
 
@@ -30,7 +31,7 @@ def sticker_tool():
         'description':'从网上获取一张适合聊天的现成表情图片（OpenMoji）。这是主动聊天反应工具：报喜庆祝、接梗、轻松附和时可直接调用，不需要对方提出发图请求。按语境选择，不按次数或概率发图；定制梗图、熊猫头等使用 image_generation。',
         'strict':True, 'parameters':{'type':'object', 'properties':{
             'mood':{'type':'string','enum':list(STICKERS)},
-            'caption':{'type':'string','description':'不超过60字的自然配文，不声称已发送。'}},
+            'caption':{'type':'string','description':'兼容字段，表情只发图片，此处填空字符串。'}},
             'required':['mood','caption'], 'additionalProperties':False}}
 
 
@@ -45,6 +46,16 @@ def get_sticker(mood, caption=''):
         raise StickerUnavailable('在线表情暂不可用') from None
     if len(raw)>2*1024*1024:
         raise ValueError('Sticker too large')
-    encoded=image_result(base64.b64encode(raw).decode('ascii'))
-    text=(caption.strip()[:120] or '给你这个表情。')+'\n素材：OpenMoji · CC BY-SA 4.0 https://openmoji.org/'
-    return MediaReply(text,[encoded])
+    # Keep the asset attribution in the image, without posting a second chat message.
+    from PIL import Image, ImageDraw
+    verified=image_bytes(base64.b64encode(raw).decode('ascii'))
+    with Image.open(io.BytesIO(verified)) as original:
+        picture=original.convert('RGB')
+        canvas=Image.new('RGB',(max(picture.width,420),picture.height+32),'white')
+        canvas.paste(picture,((canvas.width-picture.width)//2,0))
+        draw=ImageDraw.Draw(canvas)
+        draw.text((5,picture.height+2),'OpenMoji (credit footer added) | CC BY-SA 4.0',fill='#555555')
+        draw.text((5,picture.height+16),'openmoji.org | creativecommons.org/licenses/by-sa/4.0',fill='#555555')
+        out=io.BytesIO();canvas.save(out,format='PNG')
+    encoded=image_result(base64.b64encode(out.getvalue()).decode('ascii'))
+    return MediaReply('',[encoded])

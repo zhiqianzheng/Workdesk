@@ -53,7 +53,7 @@ def web_payload(config, messages):
             '先判断图片是否比文字更贴切，例如接住笑点、庆祝具体好事、表达此刻反应或提供必要示意；不合适就只回文字。'
             '不要每次配图，也不要按固定轮数、时间或概率配图；查看近期图片发送记录，避免连续同类素材或机械重复上一张图。'
             '对方表示不要图片或表情时尊重；技术排障、严肃求助、难过与冲突场景慎用娱乐图片，不调侃痛苦、不用卖萌敷衍。'
-            '不要声称找到了用户私人照片。生成/获取失败时如实说明。配文不要说已发送，程序会先确认图片发送，再发送配文。')
+            '不要声称找到了用户私人照片。生成/获取失败时如实说明。表情反应图只发图片，不添加配文或素材链接。生成图片不要附加“给你画了一张”等固定套话；只有确实有必要的解释才配文。程序会先确认图片发送。')
     inputs = []
     for message in messages:
         if message['role'] == 'system':
@@ -85,6 +85,7 @@ def response_text(result, diagnostics=None, allow_media=False):
     texts, sources = [], []
     searches = 0
     images = []
+    sticker_only = False
     for item in result.get('output', []):
         if allow_media and item.get('type') == 'function_call' and item.get('name') == 'generate_image' and not images:
             from image_provider import generate_image
@@ -96,7 +97,7 @@ def response_text(result, diagnostics=None, allow_media=False):
             arguments = json.loads(item.get('arguments', '{}'))
             sticker = get_sticker(arguments.get('mood'), arguments.get('caption', ''))
             images.extend(sticker.images)
-            texts.append(str(sticker))
+            sticker_only = True
         if item.get('type') == 'web_search_call':
             searches += 1
         if item.get('type') != 'message' or item.get('role') != 'assistant':
@@ -122,7 +123,9 @@ def response_text(result, diagnostics=None, allow_media=False):
         diagnostics.update(search_calls=searches, cited_sources=len(sources), image_count=len(images))
     if not text and not images:
         raise WebSearchError('接口未返回文字或图片。')
-    return MediaReply(text or '给你画了一张～', images) if images else text
+    if sticker_only:return MediaReply('',images)
+    if images and text.strip().rstrip('。！!~～') in ('给你画了一张','给你画了一张图','按你的要求生成了一张图'):text=''
+    return MediaReply(text, images) if images else text
 
 
 def generate_with_search(config, messages, diagnostics=None):
