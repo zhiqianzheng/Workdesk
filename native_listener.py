@@ -16,6 +16,7 @@ from ai_reply import generate, protect, AutoReply
 from native_backend import NativeAI, NativeConnection
 from native_ai_context import context_for, replyable
 from native_controls import control_text
+from assistant_profiles import load_profile, apply_profile
 
 
 def initialize(root):
@@ -40,14 +41,12 @@ def allowed(thread):
 
 
 def manual_holds():
-    try:
-        value=json.loads((PRIVATE/'manual-takeover.json').read_text(encoding='utf-8'))
-        return {k:v for k,v in value.items() if isinstance(v,(int,float)) and v>time.time()}
-    except (OSError,ValueError):return {}
+    # Compatibility: historical holds are ignored; only explicit pause controls apply.
+    return {}
 
 
 def can_reply(thread):
-    return allowed(thread) and thread not in manual_holds()
+    return allowed(thread) and load_profile(PRIVATE.parent,thread).get('mode')!='off'
 
 
 def group_addressed(info, rows):
@@ -57,18 +56,8 @@ def group_addressed(info, rows):
 
 
 def observe_manual(event, since):
-    data=event.get('data',{})
-    if (event.get('kind')!='message.committed' or data.get('direction')!='outgoing'
-            or data.get('origin')!='live' or not data.get('messageId') or data.get('threadId')=='filehelper'):
-        return
-    row=request('messages/'+quote(data['messageId']))
-    try:stamp=datetime.fromisoformat(row.get('createdAt','').replace('Z','+00:00')).timestamp()
-    except (ValueError,TypeError):return
-    if (row.get('accountId')!=CONFIG['account'] or row.get('threadId')!=data.get('threadId')
-            or row.get('direction')!='outgoing' or stamp<since or abs(time.time()-stamp)>90
-            or control_text(row.get('body'))):return
-    holds=manual_holds();holds[data['threadId']]=time.time()+600
-    save(PRIVATE/'manual-takeover.json',holds)
+    # Manual chat messages do not pause automatic replies.
+    return None
 
 
 def save(path, value):
@@ -142,11 +131,14 @@ def work(thread, messages, since=0):
                 return {'state': 'skipped_old_history'}
         if not group_addressed(info, received):return {'state':'skipped_unaddressed_group'}
         from native_ppt import requested, create_reply
+        profile=load_profile(ROOT,thread)
+        if profile.get('mode') in ('off','review'):return {'state':'profile_disabled'}
         making_ppt = requested(received)
         context = context_for(rows, received, ROOT, BASE, request, video_enabled=CONFIG.get('videoAnalysis',False),voice_enabled=CONFIG.get('voiceReplies',False),voice_language=CONFIG.get('voiceLanguage','zh'), include_documents=making_ppt)
         if (STOP.exists() or not can_reply(thread)):return {'state':'cancelled'}
-        config = dict(CONFIG)
+        config = apply_profile(CONFIG,profile)
         config['presentationGeneration'] = True
+        config['allowNoReply'] = True
         config['apiKey'] = protect(config.pop('encryptedKey'), decrypt=True) if config.get('encryptedKey') else ''
         model_start = time.monotonic()
         if making_ppt:
@@ -156,6 +148,14 @@ def work(thread, messages, since=0):
                 reply = '这次 PPT 制作没有完成，内容生成或文件检查失败，没有生成可发送的成品。可以稍后让我重新制作。'
         else:
             reply = generate(config, context)
+        # A follow-up can arrive while generation is running. Do not send a stale answer.
+        latest_stamp=max((str(r.get('createdAt') or '') for r in received),default='')
+        fresh=request('threads/'+quote(thread)+'/messages?limit=20').get('items',[])
+        known_ids={r.get('id') for r in rows}
+        if any(r.get('id') not in known_ids and r.get('threadId')==thread and replyable(r)
+               and str(r.get('createdAt') or '')>latest_stamp for r in fresh):
+            return {'state':'retry','reason':'newer_message_arrived'}
+        if getattr(reply,'skip',False):return {'state':'skipped_no_reply'}
         # Generated content must never impersonate the owner's control command.
         if control_text(str(reply)):
             return {'state': 'skipped_control_output'}
@@ -203,6 +203,8 @@ def work(thread, messages, since=0):
                 connection.close()
             if (STOP.exists() or not can_reply(thread)):
                 return {'state': 'cancelled'}
+        if images and not str(reply).strip():
+            return {'state':'accepted','imageCount':len(images),'modelSeconds':model_seconds,'totalSeconds':round(time.monotonic()-started,2)}
         dispatched = True
         sent = request('sends', {'threadId': thread, 'text': str(reply)}, key)
         deadline = time.monotonic() + 30
@@ -215,6 +217,11 @@ def work(thread, messages, since=0):
                 'totalSeconds': round(time.monotonic() - started, 2)}
     except Exception as error:
         return {'state': 'uncertain' if dispatched else 'retry', 'errorType': type(error).__name__}
+
+
+def dispatch_approved():
+    # Retired workflow: old approvals must never be replayed after simplification.
+    return None
 
 
 def main():
@@ -260,7 +267,6 @@ def main():
                     continue
                 events = request('events?after=' + quote(state['cursor']) + '&limit=200')
                 for event in events.get('items', []):
-                    observe_manual(event, state['activatedAt'])
                     data = event.get('data', {})
                     if event.get('kind') == 'message.committed' and data.get('origin') in ('live', 'catchup') and data.get('direction') == 'incoming':
                         thread, message = data.get('threadId'), data.get('messageId')

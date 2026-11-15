@@ -185,14 +185,40 @@ class Platform:
             raise ValueError('请先准备后台并登录微信。')
         return NativeAI({'directory': str(self.root), 'account': self.account}, None)
 
-    def preview_reply(self, text):
-        if not isinstance(text,str) or not text.strip() or len(text)>4000:
-            raise ValueError('请输入 1–4000 字的虚构消息。')
-        from ai_reply import generate
+    def chat_summary_report(self,thread,mode,start='',end='',count=None,progress=lambda value:None,cancel=lambda:False):
+        import chat_report
+        if not self.account:raise ValueError('请先连接微信。')
         config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
-        config['apiKey']=protect(config.pop('encryptedKey'),decrypt=True) if config.get('encryptedKey') else ''
-        config.update(webSearch=False,mediaReplies=False,ownerConversation=False)
-        return str(generate(config,[{'kind':'text','direction':'incoming','text':text.strip()}]))
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:return chat_report.run(self.root,config,connection,thread,mode,start,end,count,progress,cancel)
+        finally:connection.close()
+
+    def style_learning_preview(self,thread,days):
+        import memory_history,uuid
+        if thread=='filehelper':raise ValueError('请为好友或群聊学习你的回复风格，个人助手使用任务助理风格。')
+        connection=NativeConnection({'directory':str(self.root),'account':self.account})
+        try:data=memory_history.preview(connection,self.account,thread,days,include_outgoing=True)
+        finally:connection.close()
+        token=uuid.uuid4().hex;self._style_preview=(token,data)
+        from conversation_style import redact
+        return {'token':token,'name':data['name'],'limited':data['limited'],'samples':[{'id':r['id'],'text':redact(r['body']),'time':r['createdAt']} for r in data['rows'] if r.get('direction')=='outgoing']}
+
+    def style_learning_analyze(self,token,selected,progress=lambda value:None):
+        import conversation_style
+        cached=getattr(self,'_style_preview',None)
+        if not cached or cached[0]!=token:raise ValueError('请先重新读取聊天样本。')
+        config=json.loads((self.root/'private-data/workdesk-native-ai.json').read_text(encoding='utf-8'))
+        return conversation_style.analyze(config,cached[1],selected,progress)
+
+    def apply_learned_style(self,thread,style):
+        if not isinstance(style,str) or not style.strip():raise ValueError('请先分析样本或填写风格规则。')
+        from assistant_profiles import load_profile,save_profile
+        old=load_profile(self.root,thread)
+        return save_profile(self.root,thread,style,old.get('memory',''),old.get('mode','auto'))
+
+    def learned_contact_style(self,thread):
+        from assistant_profiles import load_profile
+        return load_profile(self.root,thread).get('style','')
 
     def update_scope(self, all_contacts, contacts):
         if type(all_contacts) is not bool or not isinstance(contacts, list) or any(not isinstance(x, str) or not x for x in contacts):
@@ -265,6 +291,7 @@ class Platform:
                 key = config.pop('apiKey')
                 config['encryptedKey'] = protect(key) if key else ''
                 (private / 'global.stop').touch()
+                config['memoryEmbeddingModel']=old.get('memoryEmbeddingModel','')
                 old.clear()
                 old.update(config)
 

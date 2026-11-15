@@ -103,6 +103,7 @@ def deliver(root,account,task):
             if image.get('state')!='observed':return {'state':'uncertain','detail':'图片发送结果需要核对。'}
         if not enabled(root,task['epoch']):return {'state':'cancelled'}
         text=task['text'];body=text[len(PREFIX):].lstrip() if text.startswith(PREFIX) else text
+        if task.get('images') and not body.strip():return {'state':'accepted'}
         chunks=[body[i:i+3300] for i in range(0,len(body),3300)] or ['']
         for index,chunk in enumerate(chunks):
             if not enabled(root,task['epoch']):return {'state':'cancelled'}

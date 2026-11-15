@@ -34,3 +34,24 @@ class StyleIntegrationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ProactiveMediaPolicyTests(unittest.TestCase):
+    def test_proactive_media_tools_are_available_without_an_explicit_image_request(self):
+        from ai_web import web_payload
+        config={'model':'test','endpoint':'http://localhost/v1/chat/completions','mediaReplies':True,'webSearch':False}
+        payload=web_payload(config,[{'role':'system','content':CHAT_STYLE},{'role':'user','content':'终于考过了！'}])
+        self.assertTrue(any(tool.get('name')=='get_sticker' for tool in payload['tools']))
+        self.assertIn('不需要对方提出发图请求',next(tool for tool in payload['tools'] if tool.get('name')=='get_sticker')['description'])
+        self.assertIn('不要先问要不要一张图',payload['instructions'])
+        self.assertEqual(payload['tool_choice'],'auto')
+        config['mediaReplies']=False
+        disabled=web_payload(config,[{'role':'user','content':'终于考过了！'}])
+        self.assertFalse(any(tool.get('name')=='get_sticker' for tool in disabled['tools']))
+
+class ConversationalTurnTests(unittest.TestCase):
+    def test_silence_signal_is_only_enabled_for_opted_in_contact_chat(self):
+        from ai_reply import normalize_reply
+        self.assertTrue(getattr(normalize_reply('[[NO_REPLY]]',{'allowNoReply':True}),'skip',False))
+        self.assertFalse(getattr(normalize_reply('[[NO_REPLY]]',{'allowNoReply':True,'ownerConversation':True}),'skip',False))
+        self.assertFalse(getattr(normalize_reply('普通回复',{'allowNoReply':True}),'skip',False))

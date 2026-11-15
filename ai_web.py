@@ -42,14 +42,18 @@ def web_payload(config, messages):
     if config.get('ownerConversation'):
         instructions.append('这是本人的个人对话，按任务需要提供充分解释、步骤和代码，不必限制为简短闲聊；需要比较时可以使用列表或表格。')
     if config.get('mediaReplies'):
-        instructions.append('你具备生成图片、获取在线表情素材并由程序发送图片的能力。对方明确要求画图、发图片、表情包时，'
+        instructions.append('先按当前话题、关系和情绪选择最贴切的表达：纯文字、emoji、表情反应图或生成图片。图片是正常聊天表达，不是只有收到作图任务才可用的附件。'
+            '报喜、一起吐槽、好笑的包袱、轻松互动等适合反应图时，主动调用 get_sticker 或图像工具直接表达，不要总用文字描述情绪替代，也不要先问要不要一张图。'
+            '例如明显开心的好消息可以用庆祝反应图接住；具体的视觉梗可以直接做图。这是语境判断示例，不是每逢好消息必须发图。'
+            '普通技术答案、日常确认等用文字即可。文字emoji同样可作为完整自然反应，不必等对方索要。'
+            '对方明确要求画图、发图片、表情包时，'
             '必须实际调用 image_generation、generate_image 或 get_sticker，不能仅给提示词、链接或声称没有该能力。'
             '按具体要求生成；只是随便要一张图时可以选轻松中性的卡通。每次最多一张。'
             '定制梗图使用图像生成；简单表情可以选在线素材。用户已授权在贴合话题和情绪时主动发图，不必等待明确索要。'
             '先判断图片是否比文字更贴切，例如接住笑点、庆祝具体好事、表达此刻反应或提供必要示意；不合适就只回文字。'
             '不要每次配图，也不要按固定轮数、时间或概率配图；查看近期图片发送记录，避免连续同类素材或机械重复上一张图。'
             '对方表示不要图片或表情时尊重；技术排障、严肃求助、难过与冲突场景慎用娱乐图片，不调侃痛苦、不用卖萌敷衍。'
-            '不要声称找到了用户私人照片。生成/获取失败时如实说明。配文不要说已发送，程序会先确认图片发送，再发送配文。')
+            '不要声称找到了用户私人照片。生成/获取失败时如实说明。表情反应图只发图片，不添加配文或素材链接。生成图片不要附加“给你画了一张”等固定套话；只有确实有必要的解释才配文。程序会先确认图片发送。')
     inputs = []
     for message in messages:
         if message['role'] == 'system':
@@ -81,6 +85,7 @@ def response_text(result, diagnostics=None, allow_media=False):
     texts, sources = [], []
     searches = 0
     images = []
+    sticker_only = False
     for item in result.get('output', []):
         if allow_media and item.get('type') == 'function_call' and item.get('name') == 'generate_image' and not images:
             from image_provider import generate_image
@@ -92,7 +97,7 @@ def response_text(result, diagnostics=None, allow_media=False):
             arguments = json.loads(item.get('arguments', '{}'))
             sticker = get_sticker(arguments.get('mood'), arguments.get('caption', ''))
             images.extend(sticker.images)
-            texts.append(str(sticker))
+            sticker_only = True
         if item.get('type') == 'web_search_call':
             searches += 1
         if item.get('type') != 'message' or item.get('role') != 'assistant':
@@ -118,7 +123,9 @@ def response_text(result, diagnostics=None, allow_media=False):
         diagnostics.update(search_calls=searches, cited_sources=len(sources), image_count=len(images))
     if not text and not images:
         raise WebSearchError('接口未返回文字或图片。')
-    return MediaReply(text or '给你画了一张～', images) if images else text
+    if sticker_only:return MediaReply('',images)
+    if images and text.strip().rstrip('。！!~～') in ('给你画了一张','给你画了一张图','按你的要求生成了一张图'):text=''
+    return MediaReply(text, images) if images else text
 
 
 def generate_with_search(config, messages, diagnostics=None):

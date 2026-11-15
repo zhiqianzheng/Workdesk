@@ -57,7 +57,7 @@ def generate_image(prompt, config=None):
             raise ValueError('生图接口返回内容过大。')
         value = json.loads(raw)
         encoded = value['data'][0]['b64_json']
-        return MediaReply('按你的要求生成了一张图。', [image_result(encoded)])
+        return MediaReply('', [image_result(encoded)])
     except urllib.error.HTTPError as error:
         raise ValueError('生图接口暂时失败（HTTP %s），未取得图片。' % error.code) from None
     except (OSError, KeyError, IndexError, TypeError) as error:

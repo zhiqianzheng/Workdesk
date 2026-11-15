@@ -149,3 +149,34 @@ class DesktopConsoleTests(unittest.TestCase):
         self.platform.update_scope.assert_called_with(False,['b'])
         ui['scope_query'].set('');self.app.update()
         self.assertTrue(ui['selection'].get(1).startswith('☑'))
+
+    def test_only_report_and_contact_style_workflows_remain(self):
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        texts=[]
+        for widget in descendants(self.app):
+            try:texts.append(str(widget.cget('text')))
+            except Exception:pass
+        joined='\n'.join(texts)
+        self.assertIn('学习我的聊天方式',joined)
+        self.assertIn('聊天总结报告',joined)
+        for retired in ['聊天记忆','清空此对象记忆','预览并学习历史','待审核文字回复','本机偏好备份与恢复','试聊预览']:
+            self.assertNotIn(retired,joined)
+        self.app.console['show_contacts']([{'id':'a','displayName':'Alice'}])
+        self.assertEqual(len(self.app.console['style_choose']['values']),1)
+
+    def test_report_can_be_reopened_after_console_restart(self):
+        folder=self.platform.root/'private-data/chat-reports'
+        folder.mkdir(parents=True)
+        (folder/'latest.md').write_text('# Saved report',encoding='utf-8')
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        button=next(widget for widget in descendants(self.app) if widget.winfo_class()=='TButton' and widget.cget('text')=='查看上次报告')
+        button.invoke();self.app.update()
+        import tkinter as tk
+        windows=[w for w in self.app.winfo_children() if isinstance(w,tk.Toplevel)]
+        self.assertTrue(any(w.title()=='聊天总结报告' for w in windows))
